@@ -29,7 +29,7 @@ uv run pytest   benchmark/bench_operations.py::test_dot_feather_gpu   benchmark/
 ```
 | Implementation | Precision | Memory Load | Execution Time (Median) | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
-| **PyTorch Native** | FP32 | 64-bit / 2 elems | 77.35 µs | 1.0x |
+| **PyTorch Native** | FP32 | 32-bit / 1 elems | 77.35 µs | 1.0x |
 | **Feather** | **Packed FP16** | **32-bit / 2 elems** | **56.30 µs** | **1.37x** |
 
 ### Installation
