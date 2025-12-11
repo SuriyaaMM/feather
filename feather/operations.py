@@ -26,7 +26,6 @@ def add_fp16_acc_fp32(
         acc += lo_val + hi_val
     return acc
 
-
 def dot_fp16_acc_fp32_vec(
     x1:np.ndarray[np.dtype[np.float32]], 
     x2:np.ndarray[np.dtype[np.float32]]
@@ -77,6 +76,7 @@ def dot_fp16_acc_fp32_numba(
         
     return acc
 
+# ----- triton GPU kernels implementation begins
 
 @triton.jit
 def _dot_fp16_acc_fp32_kernel(
@@ -86,6 +86,7 @@ def _dot_fp16_acc_fp32_kernel(
     n:int,
     BLOCK_SIZE:tl.constexpr
 ):
+    """Internal Kernel!, do not use, use `dot_fp16_acc_fp32_gpu`"""
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(start=0, end=BLOCK_SIZE)
@@ -112,10 +113,70 @@ def _dot_fp16_acc_fp32_kernel(
     acc = tl.add(x1_lower_val * x2_lower_val, x1_upper_val * x2_upper_val)
     tl.atomic_add(pointer=out, val=tl.sum(acc, dtype=tl.float32))
 
+@triton.jit
+def _dot_fp8_acc_fp32_kernel(
+    x1:torch.Tensor,
+    x2:torch.Tensor,
+    out:torch.Tensor,
+    n:int,
+    BLOCK_SIZE:tl.constexpr
+):
+    """Internal Kernel!, do not use, use `dot_fp8_acc_fp32_gpu`"""
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(start=0, end=BLOCK_SIZE)
+
+    mask = offsets < n
+
+    # raw uint32 pointers
+    x1_packed = tl.load(pointer=x1+offsets, mask=mask, other=0)
+    x2_packed = tl.load(pointer=x2+offsets, mask=mask, other=0)
+
+    # extract stored floating points
+    # a, b, c, d represents the lower -> higher bits with stride 8
+    x1_a = tl.cast((x1_packed) & 0xFF, dtype=tl.uint16) << 8
+    x1_b = tl.cast((x1_packed >> 8) & 0xFF, dtype=tl.uint16) << 8
+    x1_c = tl.cast((x1_packed >> 16) & 0xFF, dtype=tl.uint16) << 8
+    x1_d = tl.cast((x1_packed >> 24) & 0xFF, dtype=tl.uint16) << 8
+
+    x2_a = tl.cast((x2_packed) & 0xFF, dtype=tl.uint16) << 8
+    x2_b = tl.cast((x2_packed >> 8) & 0xFF, dtype=tl.uint16) << 8
+    x2_c = tl.cast((x2_packed >> 16) & 0xFF, dtype=tl.uint16) << 8
+    x2_d = tl.cast((x2_packed >> 24) & 0xFF, dtype=tl.uint16) << 8
+
+    # cast raw bits into FP16 values
+    x1_a_val = tl.cast(tl.cast(x1_a, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x1_b_val = tl.cast(tl.cast(x1_b, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x1_c_val = tl.cast(tl.cast(x1_c, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x1_d_val = tl.cast(tl.cast(x1_d, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+
+    x2_a_val = tl.cast(tl.cast(x2_a, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x2_b_val = tl.cast(tl.cast(x2_b, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x2_c_val = tl.cast(tl.cast(x2_c, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+    x2_d_val = tl.cast(tl.cast(x2_d, dtype=tl.float16, bitcast=True), dtype=tl.float32)
+
+    # accumulate in float32
+    acc1 = tl.add(x1_a_val * x2_a_val, x1_b_val * x2_b_val)
+    acc2 = tl.add(x1_c_val * x2_c_val, x1_d_val * x2_d_val)
+    tl.atomic_add(pointer=out, val=tl.add(tl.sum(acc1, dtype=tl.float32), tl.sum(acc2, dtype=tl.float32)))
+
+# ----- triton GPU kernels implementation ends
+
 def dot_fp16_acc_fp32_gpu(
     x1:torch.Tensor,
     x2:torch.Tensor
 ):
+    """
+    performs dot product on `FP16` packed `FP32` arrays, equivalent to
+    `torch.dot(x1, x2)` or `np.dot(x1, x2)`
+
+    NOTE: use `pack_fp16_ndarray` and convert it to `torch.tensor` using `torch.from_numpy()`
+
+    :param x1: tensor 1
+    :type x1: torch.Tensor
+    :param x2: tensor 2
+    :type x2: torch.Tensor
+    """
     out = torch.tensor(0.0, dtype=torch.float32).to("cuda")
     n_elements = x1.numel()
 
@@ -123,4 +184,28 @@ def dot_fp16_acc_fp32_gpu(
     grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
 
     _dot_fp16_acc_fp32_kernel[grid](x1, x2, out, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+    return out
+
+def dot_fp8_acc_fp32_gpu(
+    x1:torch.Tensor,
+    x2:torch.Tensor
+):
+    """
+    performs dot product on `FP16` casted to `FP8` and packed `FP32` arrays, equivalent to
+    `torch.dot(x1, x2)` or `np.dot(x1, x2)`
+
+    NOTE: use `pack_fp8_ndarray` and convert it to `torch.tensor` using `torch.from_numpy()`
+
+    :param x1: tensor 1
+    :type x1: torch.Tensor
+    :param x2: tensor 2
+    :type x2: torch.Tensor
+    """
+    out = torch.tensor(0.0, dtype=torch.float32).to("cuda")
+    n_elements = x1.numel()
+
+    BLOCK_SIZE = 1024
+    grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+
+    _dot_fp8_acc_fp32_kernel[grid](x1, x2, out, n_elements, BLOCK_SIZE=BLOCK_SIZE)
     return out

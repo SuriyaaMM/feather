@@ -41,13 +41,52 @@ import torch
 # print(f"packed = {packed}")
 # print(f"unpacked = {unpacked}")
 
-a = np.random.normal(size=(15000, )).astype(np.float16)
-b = np.random.normal(size=(15000, )).astype(np.float16)
+# a = np.random.normal(size=(15000, )).astype(np.float16)
+# b = np.random.normal(size=(15000, )).astype(np.float16)
 
-a_packed = pack_fp16_ndarray(a)
-b_packed = pack_fp16_ndarray(b)
+# a_packed = pack_fp16_ndarray(a)
+# b_packed = pack_fp16_ndarray(b)
 
-device = "cuda"
+# device = "cuda"
 
-print(f"dot prod (gpu) = ", dot_fp16_acc_fp32_gpu(a, b))
-print(f"dot prod (np) = ", np.dot(a, b))
+# print(f"dot prod (gpu) = ", dot_fp16_acc_fp32_gpu(a, b))
+# print(f"dot prod (np) = ", np.dot(a, b))
+
+# ----- FP8 test bench basic packing & unpacking
+# a = np.array([0.275], dtype=np.float16)
+# b = np.array([0.275], dtype=np.float16)
+# c = np.array([0.275], dtype=np.float16)
+# d = np.array([0.275], dtype=np.float16)
+
+# packed = pack_fp8_into_fp32(a, b, c, d)
+# unpacked = unpack_fp8_from_fp32(packed)
+
+# print("a = ", format(a.view(np.uint16)[0], "016b"))
+# print(f"b = ", format(b.view(np.uint16)[0], "016b"))
+# print(f"c = ", format(c.view(np.uint16)[0], "016b"))
+# print(f"d = ", format(d.view(np.uint16)[0], "016b"))
+# print(f"packed = ", format(packed.view(np.uint32)[0], "032b"))
+# print(f"unpacked = {unpacked}")
+
+# ----- FP8 array packing & unpacking
+# a = np.random.normal(size=(32,)).astype(np.float16)
+
+# packed = pack_fp8_ndarray(a)
+# unpacked = unpack_fp8_ndarray(packed)
+
+# print(f"a = {a}")
+# print(f"unpacked = {unpacked}")
+
+# a = np.random.normal(size=(300,)).astype(np.float16)
+# b = np.random.normal(size=(300,)).astype(np.float16)
+
+# print(f"dot (np) = ", np.dot(a, b))
+
+# a_packed = pack_fp8_ndarray(a)
+# b_packed = pack_fp8_ndarray(b)
+
+# a_tensor = torch.from_numpy(a_packed).view(torch.uint32).to("cuda")
+# b_tensor = torch.from_numpy(b_packed).view(torch.uint32).to("cuda")
+
+# print(f"dot (feather) = ", dot_fp8_acc_fp32_gpu(a_tensor, b_tensor))
+
