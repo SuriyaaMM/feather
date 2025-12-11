@@ -1,5 +1,7 @@
 from packers import *
+from operations import *
 import numpy as np
+import torch
 
 # a = np.array([4.5], dtype=np.float16)
 # b = np.array([1.25], dtype=np.float16)
@@ -38,3 +40,14 @@ import numpy as np
 # print(f"a = {a}")
 # print(f"packed = {packed}")
 # print(f"unpacked = {unpacked}")
+
+a = np.random.normal(size=(15000, )).astype(np.float16)
+b = np.random.normal(size=(15000, )).astype(np.float16)
+
+a_packed = pack_fp16_ndarray(a)
+b_packed = pack_fp16_ndarray(b)
+
+device = "cuda"
+
+print(f"dot prod (gpu) = ", dot_fp16_acc_fp32_gpu(a, b))
+print(f"dot prod (np) = ", np.dot(a, b))

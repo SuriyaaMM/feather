@@ -2,8 +2,8 @@ import numpy as np
 import logging
 
 def pack_fp16_into_fp32(
-    a: np.ndarray[np.dtype[np.float16]], 
-    b: np.ndarray[np.dtype[np.float16]]
+    a:np.ndarray[np.dtype[np.float16]], 
+    b:np.ndarray[np.dtype[np.float16]]
 ) -> np.ndarray[np.dtype[np.float32]]:
     """
     packs two `FP16` into `FP32`
@@ -26,7 +26,7 @@ def pack_fp16_into_fp32(
     return np.array([packed_bits], dtype=np.uint32).view(np.float32)[0]
 
 def unpack_fp32_into_fp16(
-    a: np.ndarray[np.dtype[np.float32]]
+    a:np.ndarray[np.dtype[np.float32]]
 ) -> np.ndarray[np.dtype[np.float16], np.dtype[np.float16]]:
     """
     unpacks 1 `FP32` into 2 `FP16`'s
@@ -47,7 +47,7 @@ def unpack_fp32_into_fp16(
     return unpacked
 
 def pack_fp16_ndarray(
-    x: np.ndarray[np.dtype[np.float16]]
+    x:np.ndarray[np.dtype[np.float16]]
 ):
     """
     packs an entire `FP16` array into `FP32` array
@@ -70,7 +70,7 @@ def pack_fp16_ndarray(
     return out
 
 def unpack_fp32_ndarray(
-    x: np.ndarray[np.dtype[np.float32]]
+    x:np.ndarray[np.dtype[np.float32]]
 ) -> np.ndarray[np.dtype[np.float16]]:
     """
     unpacks an entire `FP32` array packed with 2 `FP16` numbers

@@ -1,10 +1,13 @@
 import numpy as np
 import logging
+import triton
+import triton.language as tl
+import torch
 import numba
 from feather.packers import *
 
 def add_fp16_acc_fp32(
-    x: np.ndarray
+    x:np.ndarray
 ):
     """
     helper function to accumulate the packed `np.float16` compressed array
@@ -23,39 +26,10 @@ def add_fp16_acc_fp32(
         acc += lo_val + hi_val
     return acc
 
-def dot_fp16_acc_fp32(
-    x1: np.ndarray,
-    x2: np.ndarray
-):
-    """
-    helper function to perform dot product the packed `np.float16` compressed array
-    into `np.float32`
-    
-    :param x1: input array 1
-    :type x1: np.ndarray
-    :param x2: input array 1
-    :type x2: np.ndarray
-    """
-    acc = np.float32(0.0)
-    for x1i, x2i in zip(x1, x2):
-        x1i_bits = np.array([x1i], dtype=np.float32).view(np.uint32)[0]
-        lo1_bits = np.uint16(x1i_bits & 0xFFFF)
-        hi1_bits = np.uint16((x1i_bits >> 16) & 0xFFFF)
-        lo1_val = lo1_bits.view(np.float16)
-        hi1_val = hi1_bits.view(np.float16)
-
-        x2i_bits = np.array([x2i], dtype=np.float32).view(np.uint32)[0]
-        lo2_bits = np.uint16(x2i_bits & 0xFFFF)
-        hi2_bits = np.uint16((x2i_bits >> 16) & 0xFFFF)
-        lo2_val = lo2_bits.view(np.float16)
-        hi2_val = hi2_bits.view(np.float16)
-        acc += lo1_val * lo2_val + hi1_val * hi2_val
-    return acc
-
 
 def dot_fp16_acc_fp32_vec(
-    x1: np.ndarray[np.dtype[np.float16]], 
-    x2: np.ndarray[np.dtype[np.float16]]
+    x1:np.ndarray[np.dtype[np.float32]], 
+    x2:np.ndarray[np.dtype[np.float32]]
 ):
     """
     performs dot product
@@ -65,40 +39,88 @@ def dot_fp16_acc_fp32_vec(
     :param x2: input array 2 `FP16`
     :type x2: np.ndarray[np.dtype[np.float16]]
     """
-    # unpack
-    x1_lower, x1_upper = unpack_fp32_into_fp16(x1)
-    x2_lower, x2_upper = unpack_fp32_into_fp16(x2)
+    v1 = x1.view(np.float16)
+    v2 = x2.view(np.float16)
     
-    return np.sum(x1_lower * x2_lower + x1_upper * x2_upper)
+    v1_fp32 = v1.astype(np.float32)
+    v2_fp32 = v2.astype(np.float32)
 
+    return np.dot(v1_fp32, v2_fp32)
 
-@numba.njit(parallel=True, fastmath=True)
+@numba.njit(fastmath=True, parallel=True)
 def dot_fp16_acc_fp32_numba(
-    x1_u32: np.ndarray, 
-    x2_u32: np.ndarray, 
-    lut: np.ndarray
+    x1:np.ndarray[np.dtype[np.float32]],
+    x2:np.ndarray[np.dtype[np.float32]],
+    lut:np.ndarray
 ):
     """
-    Numba-accelerated dot product on packed `FP32` arrays packed using `FP16`
+    numba accelerated dot product
 
-    :param x1_u32: uint32 array, each element packs two fp16 values
-    :param x2_u32: uint32 array, each element packs two fp16 values
-    :param lut: uint16 -> float32 lookup table for fp16 decoding
+    :param x1: input array 1 `FP32`
+    :type x1: np.ndarray[np.dtype[np.float32]]
+    :param x2: input array 2 `FP32`
+    :type x2: np.ndarray[np.dtype[np.float32]]
+    :param lut: Lookup table to support `FP16` in numba
+    :type lut: np.ndarray
     """
-    acc = 0.0
-    n = x1_u32.shape[0]
-
+    
+    x1_bits = x1.view(np.uint16)
+    x2_bits = x2.view(np.uint16)
+    
+    acc = np.float32(0.0)
+    n = x1_bits.size
+    
     for i in numba.prange(n):
-        u1 = x1_u32[i]
-        u2 = x2_u32[i]
-
-        # decode halves via LUT
-        lo1 = lut[u1 & 0xFFFF]
-        hi1 = lut[(u1 >> 16) & 0xFFFF]
-
-        lo2 = lut[u2 & 0xFFFF]
-        hi2 = lut[(u2 >> 16) & 0xFFFF]
-
-        acc += lo1 * lo2 + hi1 * hi2
-
+        val_x = lut[x1_bits[i]]
+        val_y = lut[x2_bits[i]]
+        acc += val_x * val_y
+        
     return acc
+
+
+@triton.jit
+def _dot_fp16_acc_fp32_kernel(
+    x1:torch.Tensor,
+    x2:torch.Tensor,
+    out:torch.Tensor,
+    n:int,
+    BLOCK_SIZE:tl.constexpr
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(start=0, end=BLOCK_SIZE)
+
+    mask = offsets < n
+
+    # raw uint32 pointers
+    x1_packed = tl.load(pointer=x1+offsets, mask=mask, other=0)
+    x2_packed = tl.load(pointer=x2+offsets, mask=mask, other=0)
+
+    # extract stored floating points
+    x1_lower_bits = tl.cast(x1_packed & 0xFFFF, dtype=tl.uint16)
+    x2_lower_bits = tl.cast(x2_packed & 0xFFFF, dtype=tl.uint16)
+    x1_upper_bits = tl.cast((x1_packed >> 16) & 0xFFFF, dtype=tl.uint16)
+    x2_upper_bits = tl.cast((x2_packed >> 16) & 0xFFFF, dtype=tl.uint16)
+
+    # cast raw bits into FP16 values
+    x1_lower_val = tl.cast(x1_lower_bits, dtype=tl.float16, bitcast=True)
+    x2_lower_val = tl.cast(x2_lower_bits, dtype=tl.float16, bitcast=True)
+    x1_upper_val = tl.cast(x1_upper_bits, dtype=tl.float16, bitcast=True)
+    x2_upper_val = tl.cast(x2_upper_bits, dtype=tl.float16, bitcast=True)
+
+    # accumulate in float32
+    acc = tl.add(x1_lower_val * x2_lower_val, x1_upper_val * x2_upper_val)
+    tl.atomic_add(pointer=out, val=tl.sum(acc, dtype=tl.float32))
+
+def dot_fp16_acc_fp32_gpu(
+    x1:torch.Tensor,
+    x2:torch.Tensor
+):
+    out = torch.tensor(0.0, dtype=torch.float32).to("cuda")
+    n_elements = x1.numel()
+
+    BLOCK_SIZE = 1024
+    grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+
+    _dot_fp16_acc_fp32_kernel[grid](x1, x2, out, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+    return out

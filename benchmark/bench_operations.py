@@ -2,6 +2,8 @@
 import random
 from typing import List, Tuple
 
+import torch
+import torch.testing as tt
 import numpy as np
 import numpy. testing as npt
 
@@ -10,7 +12,7 @@ from feather.operations import *
 
 import pytest
 
-PARAMETERIZE_LIST = [100_000]
+PARAMETERIZE_LIST = [100_000, 500_000, 1_500_000]
 
 # to-benchmark functions
 
@@ -31,11 +33,11 @@ def bench_dot_np(
     dot_prod = np.dot(a, b)
     return dot_prod
 
-def bench_dot_feather_eager(
-    a: np.ndarray,
-    b: np.ndarray
+def bench_dot_torch(
+    a: torch.Tensor,
+    b: torch.Tensor
 ):
-    dot_prod = dot_fp16_acc_fp32(a, b)
+    dot_prod = torch.dot(a, b)
     return dot_prod
 
 def bench_dot_feather_np(
@@ -53,6 +55,11 @@ def bench_dot_feather_numba(
     dot_prod = dot_fp16_acc_fp32_numba(a, b, _FP16_LUT)
     return dot_prod
 
+def bench_dot_feather_gpu(
+    a: np.ndarray,
+    b: np.ndarray
+):
+    return dot_fp16_acc_fp32_gpu(a, b)
 
 # array generation scripts
 
@@ -73,6 +80,14 @@ def generate_input_arrays(
     return a, b 
 
 @pytest.fixture
+def generate_input_tensors(
+    n: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    a:torch.Tensor = torch.normal(mean=0, std=1, size=(n, )).to(torch.float32).to("cuda")
+    b:torch.Tensor = torch.normal(mean=0, std=1, size=(n, )).to(torch.float32).to("cuda")
+    return a, b 
+
+@pytest.fixture
 def generate_input_arrays_packed(
     n: int
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -82,7 +97,7 @@ def generate_input_arrays_packed(
     b_packed = pack_fp16_ndarray(b)
     return a_packed, b_packed
 
-# benchmark functions
+# ----- benchmark functions
 
 @pytest.mark.parametrize("n", PARAMETERIZE_LIST)
 def test_dot_python_eager(
@@ -106,21 +121,17 @@ def test_dot_np(
 
     npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-5)
 
-@pytest.mark.parametrize("n", [1_000, 10_000, 100_000])
-def test_dot_feather_eager(
+@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+def test_dot_torch(
     benchmark,
-    generate_input_arrays_packed 
+    generate_input_tensors
 ):
-    a_packed, b_packed = generate_input_arrays_packed
-    dot_prod = benchmark(bench_dot_feather_eager, a_packed, b_packed)
-    
-    a_unpacked = unpack_fp32_ndarray(a_packed)
-    b_unpacked = unpack_fp32_ndarray(b_packed)
-    dot_prod_np = np.dot(a_unpacked, b_unpacked)
-    dot_prod_np = dot_prod_np.astype(np.float32)
+    a, b = generate_input_tensors
+    a.to()
+    dot_prod = benchmark(bench_dot_torch, a, b)
+    dot_prod_torch = torch.dot(a, b)
 
-    # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
-    npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-1)
+    tt.assert_close(dot_prod_torch, dot_prod, rtol=1e-5, atol=1e-5)
 
 @pytest.mark.parametrize("n", PARAMETERIZE_LIST)
 def test_dot_feather_np(
@@ -137,3 +148,47 @@ def test_dot_feather_np(
 
     # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
     npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-1)
+
+@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+def test_dot_feather_np(
+    benchmark,
+    generate_input_arrays_packed 
+):
+    a_packed, b_packed = generate_input_arrays_packed
+    a_tensor = torch.from_numpy(a_packed).view(torch.uint32).to("cuda")
+    b_tensor = torch.from_numpy(b_packed).view(torch.uint32).to("cuda")
+
+    # compiles the numba kernel
+    bench_dot_feather_gpu(a_tensor, b_tensor)
+
+    dot_prod = benchmark(bench_dot_feather_gpu, a_tensor, b_tensor).cpu()
+
+    a_unpacked = unpack_fp32_ndarray(a_packed)
+    b_unpacked = unpack_fp32_ndarray(b_packed)
+    dot_prod_np = (a_unpacked, b_unpacked)
+    dot_prod_np = dot_prod_np.astype(np.float32)
+
+    # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
+    npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-1)
+
+@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+def test_dot_feather_gpu(
+    benchmark,
+    generate_input_arrays_packed
+):
+    a_packed, b_packed = generate_input_arrays_packed
+
+    a_tensor = torch.from_numpy(a_packed).view(torch.uint32).to("cuda")
+    b_tensor = torch.from_numpy(b_packed).view(torch.uint32).to("cuda")
+
+    dot_prod = benchmark(bench_dot_feather_gpu, a_tensor, b_tensor).cpu()
+
+    a_unpacked = unpack_fp32_ndarray(a_packed)
+    b_unpacked = unpack_fp32_ndarray(b_packed)
+
+    a_unpacked_tensor = torch.from_numpy(a_unpacked).to(torch.float32).to("cuda")
+    b_unpacked_tensor = torch.from_numpy(b_unpacked).to(torch.float32).to("cuda")
+    dot_prod_torch = torch.dot(a_unpacked_tensor, b_unpacked_tensor).cpu() 
+
+    # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
+    tt.assert_close(dot_prod_torch, dot_prod, rtol=1e-1, atol=1e-1)

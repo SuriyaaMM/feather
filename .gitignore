@@ -3,4 +3,3 @@ __pycache__/
 feather.egg-info/
 .benchmarks/
 .pytest_cache/
-results/
