@@ -5,5 +5,18 @@ requires-python = ">=3.11"
 dependencies = [
     "numba>=0.63.1",
     "numpy>=2.3.5",
+    "pygal>=3.1.0",
+    "pygaljs>=1.0.2",
+    "pytest>=9.0.2",
+    "pytest-benchmark>=5.2.3",
+    "setuptools>=80.9.0",
     "torch>=2.9.1",
+    "wheel>=0.45.1",
 ]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["feather"]

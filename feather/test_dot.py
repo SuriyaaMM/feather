@@ -1,98 +1,40 @@
-import time
-import numpy as np
 from packers import *
-from operations import *
+import numpy as np
 
-def dot_python_loop(a, b):
-    acc = 0.0
-    for ai, bi in zip(a, b):
-        acc += float(ai) * float(bi)
-    return acc
+# a = np.array([4.5], dtype=np.float16)
+# b = np.array([1.25], dtype=np.float16)
 
-N = 2_000_000
-print(f"--- Benchmark: N = {N} elements ---\n")
+# packed = pack_fp16_into_fp32(a, b)
+# unpacked = unpack_fp32_into_fp16(packed)
 
-a = np.random.normal(size=(N,)).astype(np.float16)
-b = np.random.normal(size=(N,)).astype(np.float16)
+# print(f"a = {a}")
+# print(f"b = {b}")
 
-# packing
-ap = pack_fp16_ndarray(a)
-bp = pack_fp16_ndarray(b)
+# print(f"packed = {packed}")
+# print(f"unpacked = {unpacked}")
 
-dot_fp16_acc_fp32(ap, bp) 
+# a_bits = a.view(np.uint16)[0]
+# b_bits = b.view(np.uint16)[0]
+# packed_bits = packed.view(np.uint32)[0]      
+# unpacked_bits = unpacked.view(np.uint16)
+# a_unpacked_bits = unpacked.view(np.uint16)[0]
+# b_unpacked_bits = unpacked.view(np.uint16)[1]
 
-t0 = time.time()
-packed_dot = dot_fp16_acc_fp32_vec(ap, bp)
-t1 = time.time()
+# print(f"a (FP16) bits: {format(a_bits, '016b')}")
+# print(f"b (FP16) bits: {format(b_bits, '016b')}")
 
-packed_time = t1 - t0
-packed_bytes = ap.nbytes + bp.nbytes
-packed_bw = packed_bytes / packed_time / 1e9
-packed_eff = (2 * len(ap)) / packed_time / 1e6
+# print(f"packed (FP32) bits: {format(packed_bits, '032b')}")
+# print(f"unpacked (0) (FP32) bits: {format(unpacked_bits[0], '032b')}")
+# print(f"unpacked (1) (FP32) bits: {format(unpacked_bits[0], '032b')}")
 
-dot_python_loop(a, b)
+# print(f"a (FP32) bits: {format(a_unpacked_bits, '016b')}")
+# print(f"b (FP32) bits: {format(b_unpacked_bits, '016b')}")
 
-t0 = time.time()
-python_dot = dot_python_loop(a, b)
-t1 = time.time()
+# a = np.array([4.5, 1.25, 6.175, 2.375], dtype=np.float16)
 
-python_time = t1 - t0
-python_bytes = a.nbytes + b.nbytes
-python_bw = python_bytes / python_time / 1e9
-python_eff = N / python_time / 1e6
-_FP16_LUT = np.arange(65536, dtype=np.uint16).view(np.float16).astype(np.float32)
+# packed = pack_fp16_ndarray(a)
+# unpacked = unpack_fp32_ndarray(packed)
 
-# warmup
-dot_fp16_acc_fp32_numba(ap, bp, _FP16_LUT)
-
-import time
-t0 = time.time()
-r = dot_fp16_acc_fp32_numba(ap, bp, _FP16_LUT)
-t1 = time.time()
-
-dt = t1 - t0
-
-bytes_read = ap.nbytes + bp.nbytes
-
-print("numba packed-dot result:", r)
-print("time:", dt)
-print("bandwidth (GB/s):", bytes_read / dt / 1e9)
-print("effective fp16 elems/s (M):", (2 * len(ap)) / dt / 1e6)
-
-
-# np standard dot
-tmp_a = a.astype(np.float32)
-tmp_b = b.astype(np.float32)
-
-np.dot(tmp_a, tmp_b)  
-
-t0 = time.time()
-numpy_dot = np.dot(tmp_a, tmp_b)
-t1 = time.time()
-
-numpy_time = t1 - t0
-numpy_bytes = tmp_a.nbytes + tmp_b.nbytes
-numpy_bw = numpy_bytes / numpy_time / 1e9
-numpy_eff = N / numpy_time / 1e6
-
-
-print("=== Packed FP16×2 Dot Product ===")
-print(f"result                : {packed_dot}")
-print(f"time (s)              : {packed_time}")
-print(f"bandwidth (GB/s)      : {packed_bw}")
-print(f"effective elems/s (M) : {packed_eff}")
-print()
-
-print("=== Pure Python FP16 Dot Product ===")
-print(f"result                : {python_dot}")
-print(f"time (s)              : {python_time}")
-print(f"bandwidth (GB/s)      : {python_bw}")
-print(f"effective elems/s (M) : {python_eff}")
-print()
-
-print("=== NumPy FP32 Dot Product ===")
-print(f"result                : {numpy_dot}")
-print(f"time (s)              : {numpy_time}")
-print(f"bandwidth (GB/s)      : {numpy_bw}")
-print(f"effective elems/s (M) : {numpy_eff}")
-print()
+# print(f"a = {a}")
+# print(f"packed = {packed}")
+# print(f"unpacked = {unpacked}")

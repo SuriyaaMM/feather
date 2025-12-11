@@ -1,7 +1,7 @@
 import numpy as np
 import logging
 import numba
-from packers import *
+from feather.packers import *
 
 def add_fp16_acc_fp32(
     x: np.ndarray
@@ -18,8 +18,8 @@ def add_fp16_acc_fp32(
         xi_bits = np.array([xi], dtype=np.float32).view(np.uint32)[0]
         lo_bits = np.uint16(xi_bits & 0xFFFF)
         hi_bits = np.uint16((xi_bits >> 16) & 0xFFFF)
-        lo_val = lo_bits.view(np.float16).astype(np.float32)
-        hi_val = hi_bits.view(np.float16).astype(np.float32)
+        lo_val = lo_bits.view(np.float16)[0]
+        hi_val = hi_bits.view(np.float16)[0]
         acc += lo_val + hi_val
     return acc
 
@@ -41,50 +41,49 @@ def dot_fp16_acc_fp32(
         x1i_bits = np.array([x1i], dtype=np.float32).view(np.uint32)[0]
         lo1_bits = np.uint16(x1i_bits & 0xFFFF)
         hi1_bits = np.uint16((x1i_bits >> 16) & 0xFFFF)
-        lo1_val = lo1_bits.view(np.float16).astype(np.float32)
-        hi1_val = hi1_bits.view(np.float16).astype(np.float32)
+        lo1_val = lo1_bits.view(np.float16)
+        hi1_val = hi1_bits.view(np.float16)
 
         x2i_bits = np.array([x2i], dtype=np.float32).view(np.uint32)[0]
         lo2_bits = np.uint16(x2i_bits & 0xFFFF)
         hi2_bits = np.uint16((x2i_bits >> 16) & 0xFFFF)
-        lo2_val = lo2_bits.view(np.float16).astype(np.float32)
-        hi2_val = hi2_bits.view(np.float16).astype(np.float32)
+        lo2_val = lo2_bits.view(np.float16)
+        hi2_val = hi2_bits.view(np.float16)
         acc += lo1_val * lo2_val + hi1_val * hi2_val
     return acc
 
 
-def dot_fp16_acc_fp32_vec(x1, x2):
-    # reinterpret float32 → uint32
-    bits1 = x1.view(np.uint32)
-    bits2 = x2.view(np.uint32)
-
-    # extract packed halves
-    lo1_bits = (bits1 & 0xFFFF).astype(np.uint16)
-    hi1_bits = (bits1 >> 16).astype(np.uint16)
-
-    lo2_bits = (bits2 & 0xFFFF).astype(np.uint16)
-    hi2_bits = (bits2 >> 16).astype(np.uint16)
-
-    # reinterpret halves as float16 and convert to float32
-    lo1 = lo1_bits.view(np.float16).astype(np.float32)
-    hi1 = hi1_bits.view(np.float16).astype(np.float32)
-
-    lo2 = lo2_bits.view(np.float16).astype(np.float32)
-    hi2 = hi2_bits.view(np.float16).astype(np.float32)
-
-    # vectorized dot of both halves
-    return np.sum(lo1 * lo2 + hi1 * hi2)
-
+def dot_fp16_acc_fp32_vec(
+    x1: np.ndarray[np.dtype[np.float16]], 
+    x2: np.ndarray[np.dtype[np.float16]]
+):
+    """
+    performs dot product
+    
+    :param x1: input array 1 `FP16`
+    :type x1: np.ndarray[np.dtype[np.float16]]
+    :param x2: input array 2 `FP16`
+    :type x2: np.ndarray[np.dtype[np.float16]]
+    """
+    # unpack
+    x1_lower, x1_upper = unpack_fp32_into_fp16(x1)
+    x2_lower, x2_upper = unpack_fp32_into_fp16(x2)
+    
+    return np.sum(x1_lower * x2_lower + x1_upper * x2_upper)
 
 
 @numba.njit(parallel=True, fastmath=True)
-def dot_fp16_acc_fp32_numba(x1_u32, x2_u32, lut):
+def dot_fp16_acc_fp32_numba(
+    x1_u32: np.ndarray, 
+    x2_u32: np.ndarray, 
+    lut: np.ndarray
+):
     """
-    Numba-accelerated dot product on packed FP16x2 arrays.
+    Numba-accelerated dot product on packed `FP32` arrays packed using `FP16`
 
-    x1_u32, x2_u32: uint32 arrays, each element packs two fp16 values:
-        packed = (hi << 16) | lo
-    lut: uint16 -> float32 lookup table for fp16 decoding
+    :param x1_u32: uint32 array, each element packs two fp16 values
+    :param x2_u32: uint32 array, each element packs two fp16 values
+    :param lut: uint16 -> float32 lookup table for fp16 decoding
     """
     acc = 0.0
     n = x1_u32.shape[0]

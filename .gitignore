@@ -1,2 +1,6 @@
 __pycache__/
 .venv/
+feather.egg-info/
+.benchmarks/
+.pytest_cache/
+results/
