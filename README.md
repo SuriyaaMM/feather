@@ -30,8 +30,8 @@ Performance comparison of native PyTorch operations vs Feather's packed precisio
 | Implementation | 100K Elements | 500K Elements | 1.5M Elements | Speedup (1.5M) |
 |---|---|---|---|---|
 | **PyTorch FP32** | 8.24 $\mu s$ | 34.16 $\mu s$ | 94.23 $\mu s$ | 1.0x (baseline) |
-| **Feather FP16 (packed)** | 26.36 $\mu s$ | 35.36 $\mu s$ | 87.67 $\mu s$ | **1.07×** |
-| **Feather FP8 (packed)** | 24.45 $\mu s$ | 25.70 $\mu s$ | 43.71 $\mu s$ | **2.16×** |
+| **Feather FP16 (packed)** | 26.36 $\mu s$ | 35.36 $\mu s$ | 87.67 $\mu s$ | **1.07x** |
+| **Feather FP8 (packed)** | 24.45 $\mu s$ | 25.70 $\mu s$ | 43.71 $\mu s$ | **2.16x** |
 
 ### Performance by Scale
 
@@ -44,8 +44,8 @@ Performance comparison of native PyTorch operations vs Feather's packed precisio
 - Memory bandwidth savings begin offsetting unpacking overhead
 
 #### Large Scale (1.5M elements)
-- **Feather FP8**: **2.16× faster** than PyTorch FP32/FP16
-- **Feather FP16**: **1.07× faster**, competitive with native implementations
+- **Feather FP8**: **2.16× faster** than PyTorch FP32
+- **Feather FP16**: **1.07× faster** than PyTorch FP32
 - Memory bandwidth becomes the primary bottleneck—packing delivers maximum benefit
 
 ### Memory Bandwidth Comparison
@@ -53,7 +53,6 @@ Performance comparison of native PyTorch operations vs Feather's packed precisio
 | Precision | Bytes per Element | Total Memory (1.5M elements) | Bandwidth Reduction |
 |---|---|---|---|
 | FP32 | 4 bytes | 12 MB | 1x (baseline) |
-| FP16 (native) | 2 bytes | 6 MB | 2x |
 | FP16 (packed) | 2 bytes | 6 MB | 2x |
 | **FP8 (packed)** | **1 byte** | **3 MB** | **4x** |
 
