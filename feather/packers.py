@@ -1,4 +1,6 @@
-import numpy as np 
+import numpy as np
+import torch
+import torch.functional as F 
 import logging
 
 def pack_fp16_into_fp32(
@@ -207,6 +209,38 @@ def pack_fp8_ndarray(
         idx += 1
     
     return out
+
+def pack_fp8_tensor(
+    x: torch.Tensor
+) -> torch.Tensor:
+    """
+    packs the given `FP16` tensor into `n/4` `FP32` array, here `n` is the
+    number of elements present in parameter `x`, but casts each `FP16` into
+    `FP8` before compressing
+    
+    :param x: packed `FP16` casted as `FP8`
+    :type x: torch.Tensor
+    :return: compressed tensor of `FP8` stored as `FP32`
+    :rtype: Tensor
+    """
+    # pad with zeros to prevent out of bounds
+    x_flat = x.flatten()
+    pad_len = (4 - (x_flat.numel() % 4)) % 4
+    if pad_len > 0:
+        x_flat = F.pad(x_flat, (0, pad_len), value=0.0)
+
+    # NOTE: torch.int<bits> variants are used here because of the limited
+    # support for rshift & lshift from torch
+    # view as u16
+    x_u16 = x_flat.view(torch.int16)
+    # shift to remove mantissa
+    x_u8 = (x_u16 >> 8) & 0xFF
+    # compress into fp32 tensor
+    x_u32 = x_u8.to(torch.int32)
+    x_reshaped = x_u32.view(-1, 4)
+    # pack them
+    packed_ints = (x_reshaped[:, 0]) | (x_reshaped[:, 1] << 8) | (x_reshaped[:, 2] << 16) | (x_reshaped[:, 3] << 24)
+    return packed_ints.view(torch.float32)
 
 def unpack_into_fp16_ndarray(
     x:np.ndarray[np.dtype[np.float32]]

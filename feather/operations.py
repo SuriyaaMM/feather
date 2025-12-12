@@ -76,7 +76,7 @@ def dot_fp16_acc_fp32_numba(
         
     return acc
 
-# ----- triton GPU kernels implementation begins
+# ----- triton GPU kernels implementation
 
 @triton.jit
 def _dot_fp16_acc_fp32_kernel(
@@ -111,7 +111,8 @@ def _dot_fp16_acc_fp32_kernel(
 
     # accumulate in float32
     acc = tl.add(x1_lower_val * x2_lower_val, x1_upper_val * x2_upper_val)
-    tl.atomic_add(pointer=out, val=tl.sum(acc, dtype=tl.float32))
+    acc_block = tl.sum(acc, axis=0, dtype=tl.float32)
+    tl.atomic_add(pointer=out, val=acc_block)
 
 @triton.jit
 def _dot_fp8_acc_fp32_kernel(
@@ -160,7 +161,43 @@ def _dot_fp8_acc_fp32_kernel(
     acc2 = tl.add(x1_c_val * x2_c_val, x1_d_val * x2_d_val)
     tl.atomic_add(pointer=out, val=tl.add(tl.sum(acc1, dtype=tl.float32), tl.sum(acc2, dtype=tl.float32)))
 
-# ----- triton GPU kernels implementation ends
+@triton.jit
+def _gemv_fp8_acc_fp32_kernel(
+    m: torch.Tensor, 
+    v: torch.Tensor, 
+    out: torch.Tensor, 
+    n_col: int,       
+    BLOCK_SIZE: tl.constexpr
+):
+    """Internal Kernel!, do not use, use `gemv_fp8_acc_fp32_gpu`"""
+    pid = tl.program_id(axis=0)
+    p_m_begin = m + (pid * n_col)
+    
+    offsets = tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_col
+
+    m_packed = tl.load(p_m_begin + offsets, mask=mask, other=0)
+    v_packed = tl.load(v + offsets, mask=mask, other=0)
+
+    # extract stored floating points
+    # a, b, c, d represents the lower -> higher bits with stride 8
+    m_a = tl.cast((m_packed) & 0xFF, dtype=tl.uint16) << 8
+    m_b = tl.cast((m_packed >> 8) & 0xFF, dtype=tl.uint16) << 8
+    m_c = tl.cast((m_packed >> 16) & 0xFF, dtype=tl.uint16) << 8
+    m_d = tl.cast((m_packed >> 24) & 0xFF, dtype=tl.uint16) << 8
+
+    v_a = tl.cast((v_packed) & 0xFF, dtype=tl.uint16) << 8
+    v_b = tl.cast((v_packed >> 8) & 0xFF, dtype=tl.uint16) << 8
+    v_c = tl.cast((v_packed >> 16) & 0xFF, dtype=tl.uint16) << 8
+    v_d = tl.cast((v_packed >> 24) & 0xFF, dtype=tl.uint16) << 8
+
+    # cast raw bits into FP16 values & accumulate
+    acc = (m_a.to(tl.float16, bitcast=True).to(tl.float32) * v_a.to(tl.float16, bitcast=True).to(tl.float32)) + \
+          (m_b.to(tl.float16, bitcast=True).to(tl.float32) * v_b.to(tl.float16, bitcast=True).to(tl.float32)) + \
+          (m_c.to(tl.float16, bitcast=True).to(tl.float32) * v_c.to(tl.float16, bitcast=True).to(tl.float32)) + \
+          (m_d.to(tl.float16, bitcast=True).to(tl.float32) * v_d.to(tl.float16, bitcast=True).to(tl.float32))
+
+    tl.store(out + pid, tl.sum(acc))
 
 def dot_fp16_acc_fp32_gpu(
     x1:torch.Tensor,
@@ -208,4 +245,28 @@ def dot_fp8_acc_fp32_gpu(
     grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
 
     _dot_fp8_acc_fp32_kernel[grid](x1, x2, out, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+    return out
+
+def gemv_fp8_acc_fp32_gpu(
+    m:torch.Tensor,
+    v:torch.Tensor,
+    m_shape: tuple
+):
+    """
+    performs GEMV on `FP16` casted to `FP8` and packed `FP32` arrays, equivalent to
+    `torch.mv(m, v)`
+
+    NOTE: use `pack_fp8_tensor` and convert it to `torch.tensor`
+
+    :param m: matrix
+    :type n: torch.Tensor
+    :param v: vector
+    :type v: torch.Tensor
+    """
+    out = torch.empty((m_shape[0], ), dtype=torch.float32).to("cuda")
+
+    BLOCK_SIZE = 1024
+    grid = (m_shape[0], )
+    
+    _gemv_fp8_acc_fp32_kernel[grid](m, v, out, m_shape[1], BLOCK_SIZE=BLOCK_SIZE)
     return out

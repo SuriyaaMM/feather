@@ -12,8 +12,8 @@ from feather.operations import *
 
 import pytest
 
-PARAMETERIZE_LIST = [100_000, 500_000, 1_500_000]
-
+N_PARAMETERS = [100_00, 500_000, 1_500_000]
+M_PARAMETERS = [100, 1000, 10_000]
 # to-benchmark functions
 
 # numpy implementation
@@ -61,6 +61,14 @@ def bench_dot_fp8_acc_fp32_dot_feather_gpu(
 ):
     return dot_fp8_acc_fp32_gpu(a, b)
 
+
+def bench_gemv_fp8_acc_fp32_dot_feather_gpu(
+    a: np.ndarray,
+    b: np.ndarray,
+    a_shape: tuple
+):
+    return gemv_fp8_acc_fp32_gpu(a, b, a_shape)
+
 # ----- array generation scripts 
 
 @pytest.fixture
@@ -107,7 +115,7 @@ def generate_input_arrays_packed_fp16_fp32(
 
 @pytest.fixture
 def generate_input_arrays_packed_fp8_fp32(
-    n: int
+    n:int
 ) -> Tuple[np.ndarray, np.ndarray]:
     a = np.random.normal(size=(n, )).astype(np.float16)
     b = np.random.normal(size=(n, )).astype(np.float16)
@@ -115,9 +123,18 @@ def generate_input_arrays_packed_fp8_fp32(
     b_packed = pack_fp8_ndarray(b)
     return a_packed, b_packed
 
+@pytest.fixture
+def generate_input_matrix_and_arrays_packed_fp8_fp32(
+    m:int,
+    n:int
+) -> Tuple[np.ndarray, np.ndarray]:
+    a:torch.Tensor = torch.normal(mean=0, std=1, size=(m, n)).to(torch.float16).to("cuda")
+    b:torch.Tensor = torch.normal(mean=0, std=1, size=(n, )).to(torch.float16).to("cuda")
+    return a, b 
+
 # ----- benchmark functions
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp32_torch(
     benchmark,
     generate_input_tensors_fp32
@@ -129,7 +146,7 @@ def test_dot_fp32_torch(
 
     tt.assert_close(dot_prod_torch, dot_prod, rtol=1e-5, atol=1e-5)
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp16_torch(
     benchmark,
     generate_input_tensors_fp32
@@ -141,7 +158,7 @@ def test_dot_fp16_torch(
 
     tt.assert_close(dot_prod_torch, dot_prod, rtol=1e-5, atol=1e-5)
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp16_acc_fp32_feather_np(
     benchmark,
     generate_input_arrays_packed_fp16_fp32
@@ -157,7 +174,7 @@ def test_dot_fp16_acc_fp32_feather_np(
     # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
     npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-1)
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp16_acc_fp32_feather_numba(
     benchmark,
     generate_input_arrays_packed_fp16_fp32 
@@ -173,7 +190,7 @@ def test_dot_fp16_acc_fp32_feather_numba(
     # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
     npt.assert_allclose(dot_prod_np, dot_prod, rtol=1e-1)
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp16_acc_fp32_feather_gpu(
     benchmark,
     generate_input_arrays_packed_fp16_fp32
@@ -195,7 +212,7 @@ def test_dot_fp16_acc_fp32_feather_gpu(
     # NOTE: rtol is set to 1e-1, 1e-5 seems too tight for precision
     tt.assert_close(dot_prod_torch, dot_prod, rtol=1e-1, atol=1e-1)
 
-@pytest.mark.parametrize("n", PARAMETERIZE_LIST)
+@pytest.mark.parametrize("n", N_PARAMETERS)
 def test_dot_fp8_acc_fp32_feather_gpu(
     benchmark,
     generate_input_arrays_packed_fp8_fp32
@@ -213,6 +230,25 @@ def test_dot_fp8_acc_fp32_feather_gpu(
     a_unpacked_tensor = torch.from_numpy(a_unpacked).to(torch.float32).to("cuda")
     b_unpacked_tensor = torch.from_numpy(b_unpacked).to(torch.float32).to("cuda")
     dot_prod_torch = torch.dot(a_unpacked_tensor, b_unpacked_tensor).cpu() 
+
+    # NOTE: during testing, i noticed almost 25 units of accumulation
+    # error, so i just set this to 100
+    tt.assert_close(dot_prod_torch, dot_prod, rtol=100, atol=100)
+
+@pytest.mark.parametrize("m", [10])
+@pytest.mark.parametrize("n", N_PARAMETERS)
+def test_gemv_fp8_acc_fp32_feather_gpu(
+    benchmark,
+    generate_input_matrix_and_arrays_packed_fp8_fp32
+):
+    a, b = generate_input_matrix_and_arrays_packed_fp8_fp32
+
+    a_packed = pack_fp8_tensor(a).view(torch.uint32).to("cuda")
+    b_packed = pack_fp8_tensor(b).view(torch.uint32).to("cuda")
+
+    dot_prod = benchmark(bench_gemv_fp8_acc_fp32_dot_feather_gpu, a_packed, b_packed, a.shape).cpu()
+
+    dot_prod_torch = torch.mv(a.to(torch.float32), b.to(torch.float32)).cpu() 
 
     # NOTE: during testing, i noticed almost 25 units of accumulation
     # error, so i just set this to 100
