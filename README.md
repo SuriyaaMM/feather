@@ -1,79 +1,47 @@
 # Feather
 
-**Feather** is a high-performance emulation library that brings **FP8** and **FP16** precision arithmetic to older GPU architectures lacking native low-precision support.
+**Feather** is a high-performance emulation library that brings **FP8 (E5M2 & E4M3)** precision arithmetic to older GPU architectures (Ampere, Turing, Volta) that lack native hardware support.
 
-By implementing custom bit-packing techniques and optimized Triton kernels, Feather achieves **2x+ speedups** over native PyTorch FP32/FP16 operations on memory-bandwidth-bound workloads—without requiring Ada Lovelace (RTX 40 series) or newer hardware.
+By implementing custom bit-packing and optimized **Triton** kernels, Feather bypasses the memory bandwidth bottleneck, achieving **3x speedups** over native PyTorch FP32 operations on memory-bound workloads.
 
 ## Why Feather?
 
-Modern deep learning benefits enormously from low-precision arithmetic (FP8, FP16), but native hardware support is limited to recent GPU generations:
+Modern deep learning benefits enormously from low-precision arithmetic, but native hardware support is gated behind the latest GPUs:
 
-- **FP8 native support**: Only available on Ada Lovelace+ (RTX 40 series, H100, L40S)
-- **Older architectures** (RTX 20/30 series, A100, V100): No native FP8, limited FP16 benefits for memory-bound operations
-
-**Feather bridges this gap** with software-based precision emulation that delivers real performance gains on older hardware.
+  - **Native FP8**: Exclusive to Ada Lovelace (RTX 40-series) and Hopper (H100).
+  - **Older Hardware** (RTX 3090, A100, V100): Forced to use FP16 or FP32, leaving huge bandwidth potential on the table.
+  - **NOTE**: Also supports FP16 packing.
 
 ## Key Features
 
-- **Bit-Packing**: Pack `2xFP16` or `4xFP8` values into single FP32 containers
-- **Custom GPU Kernels**: Optimized Triton kernels with FP32 accumulation
-- **Memory Bandwidth Optimization**: `2-4x` reduction in data transfer
-- **Zero Hardware Requirements**: Works on any CUDA-capable GPU
-- **Production-Ready**: Includes NumPy (CPU) and GPU implementations with comprehensive tests
+  - **Software-Based FP8**: Runs `E5M2` and `E4M3` on any CUDA GPU (RTX 20/30 series supported).
+  - **3x Speedup**: Validated **3.37x** speedup on large GEMV operations.
+  - **Correctness**:
+      - **E5M2**: Direct bit-manipulation for maximum speed.
+      - **E4M3**: Full software emulation (rebias + denorm flushing) for stability.
 
 ## Benchmark Results
 
-Performance comparison of native PyTorch operations vs Feather's packed precision implementations on GPU.
+Performance measured on **NVIDIA RTX 3050 (Ampere)**, comparing PyTorch Native (FP32) vs. Feather (FP8).
+*Task: Large Scale Matrix-Vector Multiplication (GEMV)*
 
 ### Summary Table
 
-| Implementation | 100K Elements | 500K Elements | 1.5M Elements | Speedup (1.5M) |
-|---|---|---|---|---|
-| **PyTorch FP32** | 8.24 $\mu s$ | 34.16 $\mu s$ | 94.23 $\mu s$ | 1.0x (baseline) |
-| **Feather FP16 (packed)** | 26.36 $\mu s$ | 35.36 $\mu s$ | 87.67 $\mu s$ | **1.07x** |
-| **Feather FP8 (packed)** | 24.45 $\mu s$ | 25.70 $\mu s$ | 43.71 $\mu s$ | **2.16x** |
-
-### Performance by Scale
-
-#### Small Scale (100K elements)
-- Kernel launch overhead dominates
-- **Recommendation**: Use native PyTorch for workloads <500K elements
-
-#### Medium Scale (500K elements)
-- Feather FP8 shows **25% improvement** over native operations
-- Memory bandwidth savings begin offsetting unpacking overhead
-
-#### Large Scale (1.5M elements)
-- **Feather FP8**: **2.16× faster** than PyTorch FP32
-- **Feather FP16**: **1.07× faster** than PyTorch FP32
-- Memory bandwidth becomes the primary bottleneck—packing delivers maximum benefit
-
-### Memory Bandwidth Comparison
-
-| Precision | Bytes per Element | Total Memory (1.5M elements) | Bandwidth Reduction |
+| Matrix Shape | PyTorch (FP32) | Feather (FP8-E5M2) | Feather (FP8-E4M3) | 
 |---|---|---|---|
-| FP32 | 4 bytes | 12 MB | 1x (baseline) |
-| FP16 (packed) | 2 bytes | 6 MB | 2x |
-| **FP8 (packed)** | **1 byte** | **3 MB** | **4x** |
+| **8192 x 8192** | 1,389 $\mu s$ | 431 $\mu s$ | 720 $\mu s$ |
+| **16384 x 8192** | 2,862 $\mu s$ | 841 $\mu s$ | 1,368 $\mu s$ |  
+| **16384 x 16384** | 5,635 $\mu s$ | 1,679 $\mu s$ | 2,703 $\mu s$ |  
 
-## Key Insights
-
-- **Real speedups on large-scale workloads**: `2x+` performance improvement for arrays >1M elements
-
-= **Unlocks FP8 on older hardware**: Brings modern low-precision benefits to RTX 20/30 series, A100, V100
-
-- **Memory-bandwidth optimization**: Reduces data transfer by up to `4x` for FP8
-
-- **Overhead on small workloads**: Best for arrays >500K elements; use native PyTorch for smaller sizes
-
-- **Precision trade-offs**: FP8 E5M2 format suitable for inference, not training
+More results are in `results/`
 
 ## Installation
 
 ### Prerequisites
-- Python 3.11+
-- CUDA-capable GPU
-- [uv](https://github.com/astral-sh/uv) package manager
+
+  - Python 3.10+
+  - CUDA-capable GPU
+  - [uv](https://github.com/astral-sh/uv) package manager
 
 ### Setup
 
@@ -82,49 +50,42 @@ Performance comparison of native PyTorch operations vs Feather's packed precisio
 git clone https://github.com/SuriyaaMM/feather
 cd feather
 
-# Install dependencies with uv
-uv sync
-
-# Activate virtual environment
+# Install dependencies
+uv sync 
 source .venv/bin/activate
 
 # Run benchmarks
-pytest bench_operations.py --benchmark-only
+uv run pytest benchmark/bench_gemv.py --benchmark-histogram=benchmark_results
+uv run pytest benchmark/bench_dot.py --benchmark-histogram=benchmark_results
 ```
 
-## Architecture
+## Usage Example
 
-Feather implements three computational backends:
+```python
+import torch
+import feather
 
-1. **NumPy (CPU)**: Reference implementation for correctness validation
-2. **Numba (CPU)**: JIT-compiled accelerated operations
-3. **Triton (GPU)**: Custom CUDA kernels with optimal memory access patterns
+# 1. Create standard data
+matrix = torch.randn(16384, 16384, dtype=torch.float16, device='cuda')
+vector = torch.randn(16384, dtype=torch.float16, device='cuda')
 
-All implementations use FP32 accumulation to maintain numerical stability while benefiting from reduced memory bandwidth.
+# 2. Pack data (Offline / Pre-processing step)
+# Compresses memory usage by 2x (vs FP16) or 4x (vs FP32)
+m_packed = feather.pack_fp8_tensor(matrix, mode="E5M2").cuda()
+v_packed = feather.pack_fp8_tensor(vector, mode="E5M2").cuda()
 
-## Test Environment
-
-- **GPU**: NVIDIA Ampere/Turing architecture (tested on RTX3050, :( i have only this!))
-- **Framework**: PyTorch 2.0+, Triton 2.0+
-- **Benchmark Tool**: pytest-benchmark
-- **Operations**: Dot product with FP32 accumulation
+# 3. Run Fast GEMV
+# Returns FP32 result with FP32 accumulation
+result = feather.gemv(m_packed, v_packed, original_shape=matrix.shape)
+```
 
 ## Roadmap
 
-- [ ] Matrix multiplication (GEMM) kernels
-- [ ] Attention mechanism implementations
-- [ ] Batch operations support
-- [ ] INT8 quantization support
-- [ ] Auto-tuning for optimal block sizes
-- [ ] Integration with popular ML frameworks
+  - [x] GEMV
+  - [x] E5M2 Support 
+  - [x] E4M3 Support
+  - [ ] SDPA Kernels
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-Built with:
-- [Triton](https://github.com/openai/triton) - GPU kernel language
-- [PyTorch](https://pytorch.org/) - Deep learning framework
-- [NumPy](https://numpy.org/) - Numerical computing
+MIT License - see [LICENSE](https://www.google.com/search?q=LICENSE) for details.

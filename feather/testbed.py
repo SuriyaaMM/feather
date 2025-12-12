@@ -1,7 +1,9 @@
-from packers import *
-from operations import *
 import numpy as np
 import torch
+from feather.packers.fp8 import *
+from feather.packers.fp16 import *
+from feather.routines.gemv import *
+from feather.routines.dot import *
 
 # a = np.array([4.5], dtype=np.float16)
 # b = np.array([1.25], dtype=np.float16)
@@ -17,7 +19,7 @@ import torch
 
 # a_bits = a.view(np.uint16)[0]
 # b_bits = b.view(np.uint16)[0]
-# packed_bits = packed.view(np.uint32)[0]      
+# packed_bits = packed.view(np.uint32)[0]
 # unpacked_bits = unpacked.view(np.uint16)
 # a_unpacked_bits = unpacked.view(np.uint16)[0]
 # b_unpacked_bits = unpacked.view(np.uint16)[1]
@@ -90,3 +92,26 @@ import torch
 
 # print(f"dot (feather) = ", dot_fp8_acc_fp32_gpu(a_tensor, b_tensor))
 
+# a = torch.randint(low=-3, high=3, size=(4, 4), dtype=torch.float16)
+# b = torch.randint(low=-3, high=3, size=(4,), dtype=torch.float16)
+
+# a_packed = pack_fp8_tensor(a, mode="E5M2").to("cuda")
+# b_packed = pack_fp8_tensor(b, mode="E5M2").to("cuda")
+
+# gemv = gemv_fp8_e5m2_acc_fp32_gpu(a_packed, b_packed, a.shape)
+# print(a)
+# print(b)
+# print(gemv)
+
+# a = np.random.randint(low=-3, high=3, size=(4,)).astype(np.float16)
+# b = np.random.randint(low=-3, high=3, size=(4,)).astype(np.float16)
+
+# a_packed = pack_fp16_ndarray(a)
+# b_packed = pack_fp16_ndarray(b)
+
+# _FP16_LUT = np.arange(65536, dtype=np.uint16).view(np.float16).astype(np.float32)
+# dot = dot_fp16_acc_fp32_numba(a_packed, b_packed, _FP16_LUT)
+
+# print(a)
+# print(b)
+# print(dot)
