@@ -5,3 +5,4 @@ feather.egg-info/
 .pytest_cache/
 
 docs/_build
+*.ncu-rep

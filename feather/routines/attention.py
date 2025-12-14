@@ -166,7 +166,7 @@ def _attention_fp8_e5m2_acc_fp32_kernel(
     _h_dim: tl.constexpr,
     _blk_size_seq_len: tl.constexpr,
 ):
-    _q_row_id = tl.program_id(axis=1)
+    _q_row_id = tl.program_id(axis=0)
 
     _q_ptr = _q.to(tl.pointer_type(tl.int8))
     _k_ptr = _k.to(tl.pointer_type(tl.int8))
@@ -238,7 +238,7 @@ def attention_fp8_e5m2_acc_fp32_gpu(q: torch.Tensor, k: torch.Tensor, v: torch.T
     out = torch.empty((seq_len, h_dim), dtype=torch.float32, device="cuda")
 
     BLK_SIZE_SEQ_LEN = 16
-    grid = (1, triton.cdiv(seq_len, BLK_SIZE_SEQ_LEN))
+    grid = (triton.cdiv(seq_len, BLK_SIZE_SEQ_LEN), )
 
     _attention_fp8_e5m2_acc_fp32_kernel[grid](
         q, k, v, 
@@ -246,5 +246,114 @@ def attention_fp8_e5m2_acc_fp32_gpu(q: torch.Tensor, k: torch.Tensor, v: torch.T
         seq_len, 
         h_dim, 
         BLK_SIZE_SEQ_LEN
+    )
+    return out
+
+
+@triton.autotune(
+    configs=[
+        triton.Config({'_blk_size_seq_len': 32, '_blk_size_h_dim': 128}, num_warps=4, num_stages=3),
+    ],
+    key=['_seq_len', '_h_dim'], 
+)
+@triton.jit
+def _attention_fp8_e5m2_acc_fp32_tiled_kernel(
+    _q: torch.Tensor,
+    _k: torch.Tensor,
+    _v: torch.Tensor,
+    _attn_out: torch.Tensor,
+    _seq_len: int,
+    _h_dim: tl.constexpr,
+    _blk_size_seq_len: tl.constexpr,
+    _blk_size_h_dim: tl.constexpr,
+):
+    _q_row_id = tl.program_id(axis=0)
+    _h_tile_id = tl.program_id(axis=1)
+
+    _q_ptr = _q.to(tl.pointer_type(tl.int8))
+    _k_ptr = _k.to(tl.pointer_type(tl.int8))
+    _v_ptr = _v.to(tl.pointer_type(tl.int8))
+    
+    _mask_q = (_q_row_id * _blk_size_seq_len + tl.arange(0, _blk_size_seq_len)) < _seq_len
+    _h_start = _h_tile_id * _blk_size_h_dim
+    _h_cols = _h_start + tl.arange(0, _blk_size_h_dim)
+    _mask_h = _h_cols < _h_dim
+
+    _m_prev = tl.zeros([_blk_size_seq_len], dtype=tl.float32) - float("inf")
+    _d_prev = tl.zeros([_blk_size_seq_len], dtype=tl.float32)
+    _acc = tl.zeros([_blk_size_seq_len, _blk_size_h_dim], dtype=tl.float32)
+
+    for _start_k in range(0, _seq_len, _blk_size_seq_len):
+        _mask_k = (_start_k + tl.arange(0, _blk_size_seq_len)) < _seq_len
+        
+        _qkT_dotted = tl.zeros(shape=(_blk_size_seq_len, _blk_size_seq_len), dtype=tl.float32)
+        
+        for _start_h_k in range(0, _h_dim, _blk_size_h_dim):
+            _q_ptr_rows = (_q_row_id * _blk_size_seq_len + tl.arange(0, _blk_size_seq_len)) * _h_dim
+            _q_ptr_cols = _start_h_k + tl.arange(0, _blk_size_h_dim)
+            _q_ptr_mesh = _q_ptr_rows[:, None] + _q_ptr_cols[None, :]
+            
+            _k_ptr_rows = (_start_k + tl.arange(0, _blk_size_seq_len)) * _h_dim 
+            _k_ptr_cols = _start_h_k + tl.arange(0, _blk_size_h_dim)             
+            
+            _k_ptr_mesh = _k_ptr_rows[:, None] + _k_ptr_cols[None, :]
+            
+            _q_tile_packed = tl.load(pointer=_q_ptr + _q_ptr_mesh, mask=_mask_q[:, None])
+            _k_tile_packed = tl.load(pointer=_k_ptr + _k_ptr_mesh, mask=_mask_k[:, None])
+        
+            _q_tile = (_q_tile_packed.to(tl.uint16) << 8).to(tl.float16, bitcast=True).to(tl.float16)
+            _k_tile = (_k_tile_packed.to(tl.uint16) << 8).to(tl.float16, bitcast=True).to(tl.float16)
+            
+            _k_tile_trans = tl.trans(_k_tile)
+            
+            _qkT_dotted += tl.dot(_q_tile, _k_tile_trans)
+
+        _scale = 1.0 / tl.sqrt(tl.cast(_h_dim, dtype=tl.float32))
+        _qkT_dotted = _qkT_dotted * _scale
+
+        _m_curr = tl.max(_qkT_dotted, axis=1)
+        _m_new = tl.maximum(_m_prev, _m_curr)
+
+        _alpha = tl.exp(_m_prev - _m_new)
+        _acc = _acc * _alpha[:, None]
+        _d_prev = _d_prev * _alpha
+
+        _numerator = tl.exp(_qkT_dotted - _m_new[:, None])
+        _d_prev += tl.sum(_numerator, axis=1)
+
+        _v_ptr_rows = (_start_k + tl.arange(0, _blk_size_seq_len)) * _h_dim
+        _v_ptr_cols = _h_start + tl.arange(0, _blk_size_h_dim)
+        _v_ptr_mesh = _v_ptr_rows[:, None] + _v_ptr_cols[None, :]
+        
+        _v_tile_packed = tl.load(pointer=_v_ptr + _v_ptr_mesh, mask=_mask_k[:, None] & _mask_h[None, :])
+        _v_tile = (_v_tile_packed.to(tl.uint16) << 8).to(tl.float16, bitcast=True).to(tl.float16)
+        
+        _acc += tl.dot(_numerator.to(tl.float16), _v_tile)
+
+        _m_prev = _m_new
+
+    _attn_final = _acc / _d_prev[:, None]
+    
+    # attention store
+    _attn_out_ptr_rows = (_q_row_id * _blk_size_seq_len + tl.arange(0, _blk_size_seq_len))
+    _attn_out_ptr_cols = _h_start + tl.arange(0, _blk_size_h_dim)
+    _attn_out_ptr_mesh = _attn_out_ptr_rows[:, None] * _h_dim + _attn_out_ptr_cols[None, :]
+
+    tl.store(pointer=_attn_out + _attn_out_ptr_mesh, value=_attn_final, mask=_mask_q[:, None] & _mask_h[None, :])
+
+def attention_fp8_e5m2_acc_fp32_tiled_gpu(q, k, v, seq_len, h_dim):
+
+    grid = lambda META: (
+        triton.cdiv(seq_len, META['_blk_size_seq_len']), 
+        triton.cdiv(h_dim, META['_blk_size_h_dim'])
+    )
+
+    out = torch.empty((seq_len, h_dim), dtype=torch.float32, device="cuda")
+
+    _attention_fp8_e5m2_acc_fp32_tiled_kernel[grid](
+        q, k, v, 
+        out, 
+        seq_len, 
+        h_dim
     )
     return out
