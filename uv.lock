@@ -222,6 +222,11 @@ dependencies = [
     { name = "wheel" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "feather" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "black", specifier = ">=25.12.0" },
@@ -241,6 +246,9 @@ requires-dist = [
     { name = "triton", specifier = ">=3.5.1" },
     { name = "wheel", specifier = ">=0.45.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "feather", editable = "." }]
 
 [[package]]
 name = "filelock"

@@ -23,15 +23,43 @@ Modern deep learning benefits enormously from low-precision arithmetic, but nati
 ## Benchmark Results
 
 Performance measured on **NVIDIA RTX 3050 (Ampere)**, comparing PyTorch Native (FP32) vs. Feather (FP8).
-*Task: Large Scale Matrix-Vector Multiplication (GEMV)*
 
-### Summary Table
+- *Task: Large Scale Matrix-Vector Multiplication (GEMV)*
+
+### GEMV Performance
 
 | Matrix Shape | PyTorch (FP32) | Feather (FP8-E5M2) | Feather (FP8-E4M3) | 
 |---|---|---|---|
 | **8192 x 8192** | 1,389 $\mu s$ | 431 $\mu s$ | 720 $\mu s$ |
 | **16384 x 8192** | 2,862 $\mu s$ | 841 $\mu s$ | 1,368 $\mu s$ |  
-| **16384 x 16384** | 5,635 $\mu s$ | 1,679 $\mu s$ | 2,703 $\mu s$ |  
+| **16384 x 16384** | 5,635 $\mu s$ | 1,679 $\mu s$ | 2,703 $\mu s$ |
+
+- *Task: Flash Attention (FP8 vs FP16 vs FP32)*
+
+### Flash Attention Performance
+
+Performance comparison between `torch.nn.functional.scaled_dot_product_attention` (in FP32 and FP16) and Feather's custom Triton kernel (FP8).
+
+| Head Dim | Sequence Length | PyTorch (FP32) | PyTorch (FP16) | Feather (FP8) |
+| :--- | :--- | :--- | :--- | :--- |
+| **64** | 128 | 64.9 $\mu s$ | 60.9 $\mu s$ | 35.7 $\mu s$ |
+| | 256 | 50.1 $\mu s$ | 61.2 $\mu s$ | 15.5 $\mu s$ |
+| | 512 | 85.0 $\mu s$ | 93.7 $\mu s$ | 26.0 $\mu s$ |
+| | 1024 | 252.4 $\mu s$ | 307.5 $\mu s$ | 50.6 $\mu s$ |
+| | 4096 | 3,707 $\mu s$ | 4,738 $\mu s$ | 600.1 $\mu s$ |
+| | 8192 | 15,604 $\mu s$ | 18,827 $\mu s$ | 2,056 $\mu s$ |
+| **256** | 128 | 44.7 $\mu s$ | 61.2 $\mu s$ | 13.8 $\mu s$ |
+| | 256 | 46.8 $\mu s$ | 62.7 $\mu s$ | 57.2 $\mu s$ |
+| | 512 | 148.7 $\mu s$ | 185.6 $\mu s$ | 95.3 $\mu s$ |
+| | 1024 | 428.6 $\mu s$ | 511.0 $\mu s$ | 216.9 $\mu s$ |
+| | 4096 | 5,560 $\mu s$ | 6,223 $\mu s$ | 3,047 $\mu s$ |
+| | 8192 | 22,129 $\mu s$ | 24,361 $\mu s$ | 11,500 $\mu s$ |
+| **512** | 128 | 44.2 $\mu s$ | 61.4 $\mu s$ | 14.2 $\mu s$ |
+| | 256 | 88.8 $\mu s$ | 120.3 $\mu s$ | 74.4 $\mu s$ |
+| | 512 | 191.4 $\mu s$ | 236.8 $\mu s$ | 121.5 $\mu s$ |
+| | 1024 | 702.1 $\mu s$ | 813.3 $\mu s$ | 269.1 $\mu s$ |
+| | 4096 | 8,966 $\mu s$ | 9,724 $\mu s$ | 3,090 $\mu s$ |
+| | 8192 | 33,290 $\mu s$ | 35,965 $\mu s$ | 9,887 $\mu s$ |
 
 More results are in `results/`
 
