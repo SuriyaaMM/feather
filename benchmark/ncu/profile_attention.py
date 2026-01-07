@@ -20,6 +20,22 @@ def profile_flash_attention_fp8_e5m2_acc_fp32_gpu():
     flash_attention_fp8_e5m2_acc_fp32_gpu(q_packed, k_packed, v_packed, M, N // 4)
     torch.cuda.synchronize()
 
+def profile_flash_attention_fp8_e4m3_acc_fp32_gpu():
+    M, N = 8192, 512
+
+    q = torch.randn(size=(M, N), dtype=torch.float16, device="cuda")
+    k = torch.randn(size=(M, N), dtype=torch.float16, device="cuda")
+    v = torch.randn(size=(M, N), dtype=torch.float16, device="cuda")
+
+    q_packed = pack_fp8_tensor(q, mode="E4M3").view(torch.uint32).cuda()
+    k_packed = pack_fp8_tensor(k, mode="E4M3").view(torch.uint32).cuda()
+    v_packed = pack_fp8_tensor(v, mode="E4M3").view(torch.uint32).cuda()
+
+    flash_attention_fp8_e4m3_acc_fp32_gpu(q_packed, k_packed, v_packed, M, N // 4)
+    torch.cuda.synchronize()
+    flash_attention_fp8_e4m3_acc_fp32_gpu(q_packed, k_packed, v_packed, M, N // 4)
+    torch.cuda.synchronize()
+
 def profile_attention_torch():
     M, N = 8192, 512
 

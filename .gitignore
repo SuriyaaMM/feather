@@ -6,3 +6,6 @@ feather.egg-info/
 
 docs/_build
 *.ncu-rep
+.vscode/
+accelerators/.feather_accelerator_vulkan_logs
+accelerators/builddir

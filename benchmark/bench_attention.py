@@ -1,6 +1,4 @@
-import random
 from typing import List, Tuple
-import math
 
 import pytest
 import torch
@@ -27,6 +25,10 @@ def bench_flash_attention_fp8_e5m2_acc_fp32_feather_gpu(
 ):
     return flash_attention_fp8_e5m2_acc_fp32_gpu(q, k, v, seq_len, h_dim)
 
+def bench_flash_attention_fp8_e4m3_acc_fp32_feather_gpu(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int, h_dim: int
+):
+    return flash_attention_fp8_e4m3_acc_fp32_gpu(q, k, v, seq_len, h_dim)
 
 # ----- generators
 @pytest.fixture
@@ -86,6 +88,32 @@ def test_flash_attention_fp8_e5m2_acc_fp32_feather_gpu(
 
     attn_out = benchmark(
         bench_flash_attention_fp8_e5m2_acc_fp32_feather_gpu,
+        q_packed, k_packed, v_packed, 
+        q.shape[0], q.shape[1] // 4
+    )
+
+    # torch attention
+    attn_torch = torch.nn.functional.scaled_dot_product_attention(
+        q.unsqueeze(dim=0),
+        k.unsqueeze(dim=0),
+        v.unsqueeze(dim=0),
+    ).squeeze(dim=0).to(torch.float32)
+
+    tt.assert_close(attn_torch, attn_out, rtol=10, atol=50)
+
+@pytest.mark.parametrize("seq_len", SEQ_LEN_PARAMETERS)
+@pytest.mark.parametrize("h_dim", H_DIM_PARAMETERS)
+def test_flash_attention_fp8_e4m3_acc_fp32_feather_gpu(
+    benchmark, generate_input_tensors_fp16
+):
+    q, k, v = generate_input_tensors_fp16
+
+    q_packed = pack_fp8_tensor(q, mode="E4M3").view(torch.uint32).to("cuda")
+    k_packed = pack_fp8_tensor(k, mode="E4M3").view(torch.uint32).to("cuda")
+    v_packed = pack_fp8_tensor(v, mode="E4M3").view(torch.uint32).to("cuda")
+
+    attn_out = benchmark(
+        bench_flash_attention_fp8_e4m3_acc_fp32_feather_gpu,
         q_packed, k_packed, v_packed, 
         q.shape[0], q.shape[1] // 4
     )

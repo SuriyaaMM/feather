@@ -1,0 +1,27 @@
+---
+Language: Cpp
+
+AccessModifierOffset: -4
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 8
+
+AlignAfterOpenBracket: Align
+AlignOperands: true
+BreakBeforeBraces: Linux
+BreakConstructorInitializers: AfterColon
+BreakStringLiterals: false
+AllowShortFunctionsOnASingleLine: None
+NamespaceIndentation: None
+SortIncludes: false
+
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesBeforeTrailingComments: 1
+
+ColumnLimit: 100
+Standard: Cpp03

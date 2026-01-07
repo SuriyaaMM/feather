@@ -83,8 +83,8 @@ uv sync
 source .venv/bin/activate
 
 # Run benchmarks
-uv run pytest benchmark/bench_gemv.py --benchmark-histogram=benchmark_results
-uv run pytest benchmark/bench_dot.py --benchmark-histogram=benchmark_results
+uv run pytest benchmark/bench_FILE_NAME.py --benchmark-histogram=benchmark_results
+# check benchmark/bench_*.py for filenames
 ```
 
 ## Usage Example
@@ -109,10 +109,10 @@ result = feather.gemv(m_packed, v_packed, original_shape=matrix.shape)
 
 ## Roadmap
 
-  - [x] GEMV
-  - [x] E5M2 Support 
-  - [x] E4M3 Support
-  - [ ] SDPA Kernels
+  - [x] SDPA Kernels
+  - [ ] Vulkan Support 
+  - [ ] Integration with Torch (Functional Forward Propagation)
+  - [ ] Integration with Torch (Functional Backward Propagation)
 
 ## License
 
