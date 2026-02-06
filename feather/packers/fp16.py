@@ -5,9 +5,7 @@ import torch
 import torch.functional as F
 
 
-def pack_fp16_into_fp32(
-    a: np.ndarray, b: np.ndarray
-) -> np.ndarray:
+def pack_fp16_into_fp32(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """
     Packs 2 `FP16` values into 1 `FP32` container.
 
@@ -17,7 +15,7 @@ def pack_fp16_into_fp32(
         Single element `ndarray` in `np.float16` format
     b: np.ndarray
         Single element `ndarray` in `np.float16` format
-        
+
     Returns
     -------
     np.ndarray
@@ -53,7 +51,7 @@ def unpack_fp32_into_fp16(
     ----------
     a: np.ndarray
         Single element `ndarray` in `np.float32` format
-        
+
     Returns
     -------
     np.ndarray
@@ -80,9 +78,7 @@ def unpack_fp32_into_fp16(
     return unpacked
 
 
-def pack_fp16_ndarray(
-    x: np.ndarray
-) -> np.ndarray:
+def pack_fp16_ndarray(x: np.ndarray) -> np.ndarray:
     """
     Packs an entire `ndarray` containing `np.float16` values into `np.float32` ndarray.
     Return `ndarray` is of the size `n/2`.
@@ -91,7 +87,7 @@ def pack_fp16_ndarray(
     ----------
     a: np.ndarray
         `ndarray` in `np.float16` format
-        
+
     Returns
     -------
     np.ndarray
@@ -127,7 +123,7 @@ def unpack_into_fp16_ndarray(
     ----------
     a: np.ndarray
         `ndarray` in `np.float32` format
-        
+
     Returns
     -------
     np.ndarray

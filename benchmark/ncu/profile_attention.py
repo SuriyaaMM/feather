@@ -4,6 +4,7 @@ import math
 from feather.packers.fp8 import pack_fp8_tensor
 from feather.routines.attention import *
 
+
 def profile_flash_attention_fp8_e5m2_acc_fp32_gpu():
     M, N = 8192, 512
 
@@ -20,6 +21,7 @@ def profile_flash_attention_fp8_e5m2_acc_fp32_gpu():
     flash_attention_fp8_e5m2_acc_fp32_gpu(q_packed, k_packed, v_packed, M, N // 4)
     torch.cuda.synchronize()
 
+
 def profile_flash_attention_fp8_e4m3_acc_fp32_gpu():
     M, N = 8192, 512
 
@@ -35,6 +37,7 @@ def profile_flash_attention_fp8_e4m3_acc_fp32_gpu():
     torch.cuda.synchronize()
     flash_attention_fp8_e4m3_acc_fp32_gpu(q_packed, k_packed, v_packed, M, N // 4)
     torch.cuda.synchronize()
+
 
 def profile_attention_torch():
     M, N = 8192, 512
@@ -57,6 +60,7 @@ def profile_attention_torch():
     torch.cuda.synchronize()
 
     return out
+
 
 if __name__ == "__main__":
     profile_flash_attention_fp8_e5m2_acc_fp32_gpu()

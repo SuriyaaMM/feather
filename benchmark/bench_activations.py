@@ -10,28 +10,33 @@ from feather.routines.activations import *
 
 N_PARAMETERS = [1_500_000, 7_500_000, 12_500_000, 50_000_000]
 
+
 # pytorch implementation
-def bench_relu1d_torch(x:torch.Tensor):
+def bench_relu1d_torch(x: torch.Tensor):
     out = torch.nn.functional.relu(x)
     torch.cuda.synchronize()
     return out
 
+
 # ----- feather implementations
-def bench_relu1d_fp8_ret_fp32_feather_gpu(x:torch.Tensor, n:int):
+def bench_relu1d_fp8_ret_fp32_feather_gpu(x: torch.Tensor, n: int):
     out = relu1d_fp8_ret_fp32_feather_gpu(x, n)
     torch.cuda.synchronize()
     return out
 
+
 # ----- generators
 @pytest.fixture
-def generate_input_tensors_1d(n:int) -> torch.Tensor:
+def generate_input_tensors_1d(n: int) -> torch.Tensor:
     return torch.randint(low=-4, high=5, size=(n,)).to(torch.float16).cuda()
+
 
 # ----- tests
 @pytest.mark.parametrize("n", N_PARAMETERS)
 def test_relu1d_torch(benchmark, generate_input_tensors_1d):
     x = generate_input_tensors_1d
     relu_out = benchmark(bench_relu1d_torch, x)
+
 
 @pytest.mark.parametrize("n", N_PARAMETERS)
 def test_relu1d_fp8_ret_fp32_feather_gpu(benchmark, generate_input_tensors_1d):

@@ -5,6 +5,7 @@ import triton.language as tl
 
 from feather.packers import *
 
+
 @triton.jit
 def _gemv_fp8_e5m2_acc_fp32_kernel(
     m: torch.Tensor,
@@ -135,7 +136,7 @@ def _gemv_fp8_e4m3_acc_fp32_kernel(
 
 def gemv_fp8_e5m2_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple):
     """
-    Performs `GEMV` subroutine on `FP8_E5M2` packed into `FP32` arrays. 
+    Performs `GEMV` subroutine on `FP8_E5M2` packed into `FP32` arrays.
     Computation-wise should be equivalent to `torch.mv(m, v)`.
 
     Parameters
@@ -147,17 +148,17 @@ def gemv_fp8_e5m2_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple)
     m_shape : tuple
         Shape of the original matrix before packing. Division by 4 will be
         performed internally by this function.
-        
+
     Returns
     -------
     torch.Tensor
         Output vector in FP32 format.
-        
+
     Notes
     -----
     - Parameter `m_shape` must be shape of the original matrix (before packing), division by 4 will be performed by this function itself internally.
     - Input tensors must be packed using one of the functions exposed in `feather.packers.fp8` module, else computation is undefined.
-    
+
     Examples
     --------
     >>> a = torch.randint(low=-3, high=3, size=(4, 4), dtype=torch.float16)
@@ -186,7 +187,7 @@ def gemv_fp8_e5m2_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple)
 
 def gemv_fp8_e4m3_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple):
     """
-    Performs `GEMV` subroutine on `FP8_E4M3` packed into `FP32` arrays. 
+    Performs `GEMV` subroutine on `FP8_E4M3` packed into `FP32` arrays.
     Computation-wise should be equivalent to `torch.mv(m, v)`.
 
     Parameters
@@ -198,17 +199,17 @@ def gemv_fp8_e4m3_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple)
     m_shape : tuple
         Shape of the original matrix before packing. Division by 4 will be
         performed internally by this function.
-        
+
     Returns
     -------
     torch.Tensor
         Output vector in FP32 format.
-        
+
     Notes
     -----
     - Parameter `m_shape` must be shape of the original matrix (before packing), division by 4 will be performed by this function itself internally.
     - Input tensors must be packed using one of the functions exposed in `feather.packers.fp8` module, else computation is undefined.
-    
+
     Examples
     --------
     >>> a = torch.randint(low=-3, high=3, size=(4, 4), dtype=torch.float16)
@@ -225,7 +226,7 @@ def gemv_fp8_e4m3_acc_fp32_gpu(m: torch.Tensor, v: torch.Tensor, m_shape: tuple)
     >>> tensor([  6., -16.,  -3.,   9.], device='cuda:0')
     """
     out = torch.empty((m_shape[0],), dtype=torch.float32).to("cuda")
-    
+
     BLOCK_SIZE = 1024
     grid = (m_shape[0],)
 

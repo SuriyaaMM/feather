@@ -3,6 +3,7 @@ import feather
 from feather.packers.fp8 import pack_fp8_tensor
 from feather.routines.gemv import *
 
+
 def profile_gemv_torch():
     M, N = 16384, 16384
 
@@ -14,6 +15,7 @@ def profile_gemv_torch():
 
     torch.mv(a, b)
     torch.cuda.synchronize()
+
 
 def profile_gemv_fp8_e5m2_acc_fp32_gpu():
     M, N = 16384, 16384
@@ -30,6 +32,7 @@ def profile_gemv_fp8_e5m2_acc_fp32_gpu():
     gemv_fp8_e5m2_acc_fp32_gpu(a_packed, b_packed, (M, N))
     torch.cuda.synchronize()
 
+
 def profile_gemv_fp8_e4m3_acc_fp32_gpu():
     M, N = 16384, 16384
 
@@ -44,6 +47,7 @@ def profile_gemv_fp8_e4m3_acc_fp32_gpu():
 
     gemv_fp8_e4m3_acc_fp32_gpu(a_packed, b_packed, (M, N))
     torch.cuda.synchronize()
+
 
 if __name__ == "__main__":
     profile_gemv_torch()

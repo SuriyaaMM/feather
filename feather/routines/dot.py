@@ -6,11 +6,10 @@ import triton.language as tl
 
 from feather.packers import *
 
-def dot_fp16_acc_fp32_vec(
-    x1: np.ndarray, x2: np.ndarray
-) -> np.ndarray:
+
+def dot_fp16_acc_fp32_vec(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
     """
-    Performs `DOT` subroutine on `FP16` packed into `FP32` arrays. 
+    Performs `DOT` subroutine on `FP16` packed into `FP32` arrays.
     Computation-wise should be equivalent to `np.dot(x1, x2)`.
 
     Parameters
@@ -19,7 +18,7 @@ def dot_fp16_acc_fp32_vec(
         Vector ndarray (packed format).
     x2 : np.ndarray
         Vector ndarray (packed format).
-        
+
     Returns
     -------
     np.ndarray
@@ -29,7 +28,7 @@ def dot_fp16_acc_fp32_vec(
     ----
     - If the input arrays `x1` and `x2` are not packed, then the computation
     will result in garbage.
-    
+
     Examples
     --------
     >>> a = np.random.randint(low=-3, high=3, size=(4,)).astype(np.float16)
@@ -67,7 +66,7 @@ def dot_fp16_acc_fp32_numba(
         Vector ndarray (packed format).
     x2 : np.ndarray
         Vector ndarray (packed format).
-        
+
     Returns
     -------
     np.ndarray
@@ -77,7 +76,7 @@ def dot_fp16_acc_fp32_numba(
     ----
     - If the input arrays `x1` and `x2` are not packed, then the computation
     will result in garbage.
-    
+
     Examples
     --------
     >>> a = np.random.randint(low=-3, high=3, size=(4,)).astype(np.float16)
@@ -104,6 +103,7 @@ def dot_fp16_acc_fp32_numba(
         acc += val_x * val_y
 
     return acc
+
 
 @triton.jit
 def _dot_fp16_acc_fp32_kernel(
@@ -140,6 +140,7 @@ def _dot_fp16_acc_fp32_kernel(
     acc = tl.add(x1_lower_val * x2_lower_val, x1_upper_val * x2_upper_val)
     acc_block = tl.sum(acc, axis=0, dtype=tl.float32)
     tl.atomic_add(pointer=out, val=acc_block)
+
 
 @triton.jit
 def _dot_fp8_e5m2_acc_fp32_kernel(
@@ -191,9 +192,10 @@ def _dot_fp8_e5m2_acc_fp32_kernel(
         val=tl.add(tl.sum(acc1, dtype=tl.float32), tl.sum(acc2, dtype=tl.float32)),
     )
 
+
 def dot_fp16_acc_fp32_gpu(x1: torch.Tensor, x2: torch.Tensor):
     """
-    Performs `DOT` subroutine on `FP16` packed into `FP32` arrays. 
+    Performs `DOT` subroutine on `FP16` packed into `FP32` arrays.
     Computation-wise should be equivalent to `torch.dot(x1, x2)`.
 
     Parameters
@@ -202,7 +204,7 @@ def dot_fp16_acc_fp32_gpu(x1: torch.Tensor, x2: torch.Tensor):
         Vector tensor (packed format).
     x2 : torch.Tensor
         Vector tensor (packed format).
-        
+
     Returns
     -------
     torch.Tensor
@@ -217,9 +219,10 @@ def dot_fp16_acc_fp32_gpu(x1: torch.Tensor, x2: torch.Tensor):
     _dot_fp16_acc_fp32_kernel[grid](x1, x2, out, n_elements, BLOCK_SIZE=BLOCK_SIZE)
     return out
 
+
 def dot_fp8_e5m2_acc_fp32_gpu(x1: torch.Tensor, x2: torch.Tensor):
     """
-    Performs `DOT` subroutine on `FP8_E5M2` packed into `FP32` arrays. 
+    Performs `DOT` subroutine on `FP8_E5M2` packed into `FP32` arrays.
     Computation-wise should be equivalent to `torch.dot(x1, x2)`.
 
     Parameters
@@ -228,17 +231,17 @@ def dot_fp8_e5m2_acc_fp32_gpu(x1: torch.Tensor, x2: torch.Tensor):
         Vector tensor (packed format).
     x2 : torch.Tensor
         Vector tensor (packed format).
-        
+
     Returns
     -------
     torch.Tensor
         Output vector in FP32 format.
-        
+
     Notes
     -----
-    - Input tensors must be packed using one of the functions exposed in 
+    - Input tensors must be packed using one of the functions exposed in
     `feather.packers.fp8` module, else computation is undefined.
-    
+
     Examples
     --------
     >>> a = torch.randint(low=-3, high=3, size=(4, 4), dtype=torch.float16)

@@ -5,12 +5,13 @@ import numpy as np
 import torch
 import torch.functional as F
 
+
 def pack_fp8_into_fp32_legacy(
-    a:np.ndarray[np.dtype[np.float16]],
-    b:np.ndarray[np.dtype[np.float16]],
-    c:np.ndarray[np.dtype[np.float16]],
-    d:np.ndarray[np.dtype[np.float16]],
-    mode: str = "E5M2"
+    a: np.ndarray[np.dtype[np.float16]],
+    b: np.ndarray[np.dtype[np.float16]],
+    c: np.ndarray[np.dtype[np.float16]],
+    d: np.ndarray[np.dtype[np.float16]],
+    mode: str = "E5M2",
 ) -> np.ndarray[np.dtype[np.float32]]:
     """
     packs `4xFP16` floats casted into `FP8` into a `FP32` container \\
@@ -32,10 +33,19 @@ def pack_fp8_into_fp32_legacy(
     :rtype: ndarray[dtype[float32], dtype[Any]]
     """
     # sanity checks
-    if a.dtype != np.float16 or b.dtype != np.float16 or d.dtype != np.float16 or c.dtype != np.float16:
-        logging.warning(f"PARAM a ({a}) or b ({b}) or c({c}) or d ({d}) was not float16, routine is undefined!")
+    if (
+        a.dtype != np.float16
+        or b.dtype != np.float16
+        or d.dtype != np.float16
+        or c.dtype != np.float16
+    ):
+        logging.warning(
+            f"PARAM a ({a}) or b ({b}) or c({c}) or d ({d}) was not float16, routine is undefined!"
+        )
     if len(a.shape) > 1 or len(b.shape) > 1 or len(c.shape) > 1 or len(c.shape) > 1:
-        logging.warning(f"PARAM a ({a}) or b ({b}) or c({c}) or d ({d}) had more than 1 element to pack")
+        logging.warning(
+            f"PARAM a ({a}) or b ({b}) or c({c}) or d ({d}) had more than 1 element to pack"
+        )
 
     # view as u16
     a_u16 = np.array([a], dtype=np.float16).view(np.uint16)[0]
@@ -137,13 +147,12 @@ def pack_fp8_into_fp32(
 
 
 def pack_fp8_ndarray_legacy(
-    x:np.ndarray[np.dtype[np.float16]],
-    mode: str = "E5M2"
+    x: np.ndarray[np.dtype[np.float16]], mode: str = "E5M2"
 ) -> np.ndarray[np.dtype[np.float32]]:
     """
     Packs an entire `ndarray` of `FP16` values into 1 `FP32` container.
     Casts from `FP16` into `FP8` before packing.
-    Packed array contains `n\\4` elements. 
+    Packed array contains `n\\4` elements.
 
     Parameters
     ----------
@@ -164,20 +173,18 @@ def pack_fp8_ndarray_legacy(
     - The Implementation is naive python for loops, do not use this.
     """
     # pre-allocate output array
-    out = np.empty((len(x)+3)//4, dtype=np.float32)
+    out = np.empty((len(x) + 3) // 4, dtype=np.float32)
 
     idx = 0
     # TODO: vectorize this loop
     for i in range(0, len(x), 4):
-        out[idx] = pack_fp8_into_fp32(x[i], x[i+1], x[i+2], x[i+3], mode)
+        out[idx] = pack_fp8_into_fp32(x[i], x[i + 1], x[i + 2], x[i + 3], mode)
         idx += 1
 
     return out
 
 
-def pack_fp8_ndarray(
-    x: np.ndarray, mode: str = "E5M2"
-) -> np.ndarray:
+def pack_fp8_ndarray(x: np.ndarray, mode: str = "E5M2") -> np.ndarray:
     """
     Packs an entire `ndarray` of `FP16` values into 1 `FP32` container.
     Casts from `FP16` into `FP8` before packing.
@@ -210,10 +217,7 @@ def pack_fp8_ndarray(
     )
 
 
-def pack_fp8_tensor_legacy(
-    x: torch.Tensor,
-    mode: str = "E5M2"
-) -> torch.Tensor:
+def pack_fp8_tensor_legacy(x: torch.Tensor, mode: str = "E5M2") -> torch.Tensor:
     """
     Packs an entire `torch.Tensor` of `FP16` values into 1 `FP32` container.
     Casts from `FP16` into `FP8` before packing.
@@ -253,7 +257,12 @@ def pack_fp8_tensor_legacy(
     x_u32 = x_u8.to(torch.int32)
     x_reshaped = x_u32.view(-1, 4)
     # pack them
-    packed_ints = (x_reshaped[:, 0]) | (x_reshaped[:, 1] << 8) | (x_reshaped[:, 2] << 16) | (x_reshaped[:, 3] << 24)
+    packed_ints = (
+        (x_reshaped[:, 0])
+        | (x_reshaped[:, 1] << 8)
+        | (x_reshaped[:, 2] << 16)
+        | (x_reshaped[:, 3] << 24)
+    )
     return packed_ints.view(torch.float32)
 
 
@@ -281,10 +290,7 @@ def pack_fp8_tensor(x: torch.Tensor, mode: str = "E5M2") -> torch.Tensor:
     return torch.from_numpy(pack_fp8_ndarray(x_np, mode=mode).view(np.uint32))
 
 
-def unpack_fp8_from_fp32_legacy(
-    a:np.ndarray,
-    mode: str = "E5M2"
-) -> np.ndarray:
+def unpack_fp8_from_fp32_legacy(a: np.ndarray, mode: str = "E5M2") -> np.ndarray:
     """
     UnPacks 4 `FP8` values from 1 `FP32` container.
 
@@ -329,13 +335,15 @@ def unpack_fp8_from_fp32_legacy(
         d_e5m2 = d_bits << 8
 
     # convert into u16, view as fp16 and cast to fp32
-    unpacked = np.array([x_e5m2, b_e5m2, c_e5m2, d_e5m2], dtype=np.uint16).view(np.float16).astype(np.float32)
+    unpacked = (
+        np.array([x_e5m2, b_e5m2, c_e5m2, d_e5m2], dtype=np.uint16)
+        .view(np.float16)
+        .astype(np.float32)
+    )
     return unpacked
 
 
-def unpack_fp8_from_fp32(
-    a: np.ndarray, mode: str = "E5M2"
-) -> np.ndarray:
+def unpack_fp8_from_fp32(a: np.ndarray, mode: str = "E5M2") -> np.ndarray:
     """
     UnPacks 4 `FP8` values from 1 `FP32` container.
 
@@ -392,9 +400,7 @@ def unpack_fp8_from_fp32(
     return unpacked
 
 
-def unpack_into_fp8_ndarray(
-    x: np.ndarray, mode: str = "E5M2"
-) -> np.ndarray:
+def unpack_into_fp8_ndarray(x: np.ndarray, mode: str = "E5M2") -> np.ndarray:
     """
     UnPacks an entire `ndarray` of `FP8` values into 4 `FP16` container.
     Casts from `FP8` into `FP16` before packing.
