@@ -295,7 +295,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
     _max_blocks_per_sequence: tl.constexpr,  # for block table traversal
     _block_size: tl.constexpr,  # for cache traversal
 ):
-    """Internal Kernel!, use paged_attention_fp8_e5m2_acc_fp32_kernel"""
+    """Internal Kernel!, use paged_attention_fp8_e5m2_acc_fp32"""
 
     # x - along batch, y - along heads
     pidx = tl.program_id(axis=0)
@@ -303,24 +303,27 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
 
     # constants
     sqrt_d = tl.sqrt(tl.cast(_head_dim * 4, dtype=tl.float32))
-    chunk_size = _n_heads_per_chunk * _head_dim
+
+    # stride/index/arange constants
+    index_batch_vector = pidx * _n_heads
+    index_batch_block = pidx * _max_blocks_per_sequence
+    stride_head = pidy * _n_heads_per_chunk
+    arange_head_vector = tl.arange(start=0, end=_head_dim)
+    arange_n_heads = tl.arange(start=0, end=_n_heads_per_chunk)
+    arange_n_blocks = tl.arange(start=0, end=_block_size)
 
     # load a contiguous chunk of q from memory
     # q_offsets.shape = (_n_heads_per_chunk, _head_dim)
-    q_offsets_y = (
-        (pidx * _n_heads * _head_dim)
-        + (pidy * _head_dim)
-        + tl.arange(start=0, end=_n_heads_per_chunk)
-    )
-
-    q_offsets_x = tl.arange(start=0, end=_head_dim)
+    q_offsets_y = index_batch_vector + stride_head + arange_n_heads
+    q_offsets_x = arange_head_vector
     q_offsets = q_offsets_x[None, :] + q_offsets_y[:, None] * _head_dim
 
-    # mask for current tile
-    mask = q_offsets_y < _n_heads
+    # mask for current chunk
+    mask = (stride_head + arange_n_heads) < _n_heads
+    mask = mask[:, None]
 
     # load q
-    q_chunk_packed = tl.load(pointer=_q + q_offsets, mask=mask[:, None], other=0.0)
+    q_chunk_packed = tl.load(pointer=_q + q_offsets, mask=mask, other=0.0)
     # unpack q
     q_chunk_a = (tl.cast((q_chunk_packed) & 0xFF, dtype=tl.uint16) << 8).to(
         tl.float16, bitcast=True
@@ -341,7 +344,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
     )
     l_chunk = tl.zeros(shape=(_n_heads_per_chunk,), dtype=tl.float32)
 
-    # attention output blocks
+    # attention output 
     a_chunk_a = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_b = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_c = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
@@ -349,29 +352,24 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
 
     context_len = tl.load(pointer=_context_lens + pidx)
     n_iterations = (context_len + (_block_size - 1)) // _block_size
-
-    kv_offset = (tl.arange(start=0, end=_head_dim)[:, None] * _block_size) + tl.arange(
-        start=0, end=_block_size
-    )[None, :]
+    kv_offset = (arange_head_vector[:, None] * _block_size) + arange_n_blocks[None, :]
 
     for block_index in tl.range(arg1=0, arg2=n_iterations):
 
-        physical_index_offset = (pidx * _max_blocks_per_sequence) + block_index
-
+        physical_index_offset = index_batch_block + block_index
         physical_index = tl.load(pointer=_block_table + physical_index_offset)
 
         kv_base_offset = (physical_index * _n_heads * _head_dim * _block_size) + (
-            pidy * _head_dim * _block_size
+            pidy * _n_heads_per_chunk * _head_dim * _block_size
         )
 
-        mask_kv = (
-            block_index * _block_size + tl.arange(start=0, end=_block_size)
-        ) < context_len
+        mask_kv = (block_index * _block_size + arange_n_blocks) < context_len
+        mask_kv = mask_kv[None, :]
 
         # load k
         k_chunk_packed = tl.load(
             pointer=_k_cache + kv_offset + kv_base_offset,
-            mask=mask_kv[None, :],
+            mask=mask_kv,
             other=0.0,
         )
         # unpack k
@@ -391,7 +389,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
         # load v
         v_chunk_packed = tl.load(
             pointer=_v_cache + kv_offset + kv_base_offset,
-            mask=mask_kv[None, :],
+            mask=mask_kv,
             other=0.0,
         )
         # unpack v
@@ -433,31 +431,204 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
         l_chunk = l_chunk * alpha + tl.sum(beta, axis=1)
         m_chunk = m_chunk_inner_new
 
-        a_chunk_a *= alpha[:, None]
-        a_chunk_b *= alpha[:, None]
-        a_chunk_c *= alpha[:, None]
-        a_chunk_d *= alpha[:, None]
-
+        alpha = alpha[:, None]
+        a_chunk_a *= alpha
+        a_chunk_b *= alpha
+        a_chunk_c *= alpha
+        a_chunk_d *= alpha
+       
         beta = beta.to(tl.float16)
         a_chunk_a += tl.dot(input=beta, other=tl.trans(input=v_chunk_a))
         a_chunk_b += tl.dot(input=beta, other=tl.trans(input=v_chunk_b))
         a_chunk_c += tl.dot(input=beta, other=tl.trans(input=v_chunk_c))
         a_chunk_d += tl.dot(input=beta, other=tl.trans(input=v_chunk_d))
 
-    a_chunk_a /= l_chunk[:, None]
-    a_chunk_b /= l_chunk[:, None]
-    a_chunk_c /= l_chunk[:, None]
-    a_chunk_d /= l_chunk[:, None]
+    l_chunk = l_chunk[:, None]
+    
+    a_chunk_a /= l_chunk
+    a_chunk_b /= l_chunk
+    a_chunk_c /= l_chunk
+    a_chunk_d /= l_chunk
 
-    out_row_base = q_offsets_y[:, None] * (_head_dim * 4)
-    out_col_base = q_offsets_x[None, :] * 4
+    out_offset_base = q_offsets * 4
+    tl.store(_attention_out + out_offset_base + 0, a_chunk_a, mask=mask)
+    tl.store(_attention_out + out_offset_base + 1, a_chunk_b, mask=mask)
+    tl.store(_attention_out + out_offset_base + 2, a_chunk_c, mask=mask)
+    tl.store(_attention_out + out_offset_base + 3, a_chunk_d, mask=mask)
 
-    out_ptr_base = _attention_out + out_row_base + out_col_base
-    tl.store(out_ptr_base + 0, a_chunk_a, mask=mask[:, None])
-    tl.store(out_ptr_base + 1, a_chunk_b, mask=mask[:, None])
-    tl.store(out_ptr_base + 2, a_chunk_c, mask=mask[:, None])
-    tl.store(out_ptr_base + 3, a_chunk_d, mask=mask[:, None])
+@triton.jit
+def _paged_attention_fp8_e4m3_acc_fp32_kernel(
+    _q: torch.Tensor,  # [batch_size, num_heads, head_dim]
+    _k_cache: torch.Tensor,  # [num_blocks, num_heads, head_dim, block_size]
+    _v_cache: torch.Tensor,  # [num_blocks, num_heads, head_dim, block_size]
+    _block_table: torch.Tensor,  # [batch_size, max_blocks_per_sequence]
+    _context_lens: torch.Tensor,  # [batch_size]
+    _attention_out: torch.Tensor,  # [batch_size, num_heads, head_dim]
+    _batch_size: int,  # number of sequences in this batch
+    _head_dim: tl.constexpr,  # dimension of each head
+    _n_heads: tl.constexpr,  # number of heads
+    _n_heads_per_chunk: tl.constexpr,  # number of heads to load per chunk
+    _max_blocks_per_sequence: tl.constexpr,  # for block table traversal
+    _block_size: tl.constexpr,  # for cache traversal
+):
+    """Internal Kernel!, use paged_attention_fp8_e5m2_acc_fp32"""
 
+    # x - along batch, y - along heads
+    pidx = tl.program_id(axis=0)
+    pidy = tl.program_id(axis=1)
+
+    # constants
+    sqrt_d = tl.sqrt(tl.cast(_head_dim * 4, dtype=tl.float32))
+
+    # stride/index/arange constants
+    index_batch_vector = pidx * _n_heads
+    index_batch_block = pidx * _max_blocks_per_sequence
+    stride_head = pidy * _n_heads_per_chunk
+    arange_head_vector = tl.arange(start=0, end=_head_dim)
+    arange_n_heads = tl.arange(start=0, end=_n_heads_per_chunk)
+    arange_n_blocks = tl.arange(start=0, end=_block_size)
+
+    # load a contiguous chunk of q from memory
+    # q_offsets.shape = (_n_heads_per_chunk, _head_dim)
+    q_offsets_y = index_batch_vector + stride_head + arange_n_heads
+    q_offsets_x = arange_head_vector
+    q_offsets = q_offsets_x[None, :] + q_offsets_y[:, None] * _head_dim
+
+    # mask for current chunk
+    mask = (stride_head + arange_n_heads) < _n_heads
+    mask = mask[:, None]
+
+    # load q
+    q_chunk_packed = tl.load(pointer=_q + q_offsets, mask=mask, other=0.0)
+    # unpack q
+    q_chunk_a = _unpack_e4m3_to_fp16(tl.cast((q_chunk_packed) & 0xFF, dtype=tl.uint16))
+    q_chunk_b = _unpack_e4m3_to_fp16(
+        tl.cast((q_chunk_packed >> 8) & 0xFF, dtype=tl.uint16)
+    )
+    q_chunk_c = _unpack_e4m3_to_fp16(
+        tl.cast((q_chunk_packed >> 16) & 0xFF, dtype=tl.uint16)
+    )
+    q_chunk_d = _unpack_e4m3_to_fp16(
+        tl.cast((q_chunk_packed >> 24) & 0xFF, dtype=tl.uint16)
+    )
+
+    # online softmax tiles
+    m_chunk = tl.full(
+        shape=(_n_heads_per_chunk,), value=float("-inf"), dtype=tl.float32
+    )
+    l_chunk = tl.zeros(shape=(_n_heads_per_chunk,), dtype=tl.float32)
+
+    # attention output 
+    a_chunk_a = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
+    a_chunk_b = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
+    a_chunk_c = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
+    a_chunk_d = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
+
+    context_len = tl.load(pointer=_context_lens + pidx)
+    n_iterations = (context_len + (_block_size - 1)) // _block_size
+    kv_offset = (arange_head_vector[:, None] * _block_size) + arange_n_blocks[None, :]
+
+    for block_index in tl.range(arg1=0, arg2=n_iterations):
+
+        physical_index_offset = index_batch_block + block_index
+        physical_index = tl.load(pointer=_block_table + physical_index_offset)
+
+        kv_base_offset = (physical_index * _n_heads * _head_dim * _block_size) + (
+            pidy * _n_heads_per_chunk * _head_dim * _block_size
+        )
+
+        mask_kv = (block_index * _block_size + arange_n_blocks) < context_len
+        mask_kv = mask_kv[None, :]
+
+        # load k
+        k_chunk_packed = tl.load(
+            pointer=_k_cache + kv_offset + kv_base_offset,
+            mask=mask_kv,
+            other=0.0,
+        )
+        # unpack k
+        k_chunk_a = _unpack_e4m3_to_fp16(
+            tl.cast((k_chunk_packed) & 0xFF, dtype=tl.uint16)
+        )
+        k_chunk_b = _unpack_e4m3_to_fp16(
+            tl.cast((k_chunk_packed >> 8) & 0xFF, dtype=tl.uint16)
+        )
+        k_chunk_c = _unpack_e4m3_to_fp16(
+            tl.cast((k_chunk_packed >> 16) & 0xFF, dtype=tl.uint16)
+        )
+        k_chunk_d = _unpack_e4m3_to_fp16(
+            tl.cast((k_chunk_packed >> 24) & 0xFF, dtype=tl.uint16)
+        )
+
+        # load v
+        v_chunk_packed = tl.load(
+            pointer=_v_cache + kv_offset + kv_base_offset,
+            mask=mask_kv,
+            other=0.0,
+        )
+        # unpack v
+        v_chunk_a = _unpack_e4m3_to_fp16(
+            tl.cast((v_chunk_packed) & 0xFF, dtype=tl.uint16)
+        )
+        v_chunk_b = _unpack_e4m3_to_fp16(
+            tl.cast((v_chunk_packed >> 8) & 0xFF, dtype=tl.uint16)
+        )
+        v_chunk_c = _unpack_e4m3_to_fp16(
+            tl.cast((v_chunk_packed >> 16) & 0xFF, dtype=tl.uint16)
+        )
+        v_chunk_d = _unpack_e4m3_to_fp16(
+            tl.cast((v_chunk_packed >> 24) & 0xFF, dtype=tl.uint16)
+        )
+
+        # partial attention score
+        t_chunk_a = tl.dot(input=q_chunk_a, other=k_chunk_a)
+        t_chunk_b = tl.dot(input=q_chunk_b, other=k_chunk_b)
+        t_chunk_c = tl.dot(input=q_chunk_c, other=k_chunk_c)
+        t_chunk_d = tl.dot(input=q_chunk_d, other=k_chunk_d)
+
+        t_chunk = (
+            t_chunk_a.to(tl.float32)
+            + t_chunk_b.to(tl.float32)
+            + t_chunk_c.to(tl.float32)
+            + t_chunk_d.to(tl.float32)
+        )
+
+        t_chunk /= sqrt_d
+
+        # online softmax
+        m_chunk_inner_this = tl.max(t_chunk, axis=1)
+        m_chunk_inner_new = tl.maximum(m_chunk, m_chunk_inner_this)
+
+        alpha = tl.exp(m_chunk - m_chunk_inner_new)
+        beta = tl.exp(t_chunk - m_chunk_inner_new[:, None])
+
+        l_chunk = l_chunk * alpha + tl.sum(beta, axis=1)
+        m_chunk = m_chunk_inner_new
+
+        alpha = alpha[:, None]
+        a_chunk_a *= alpha
+        a_chunk_b *= alpha
+        a_chunk_c *= alpha
+        a_chunk_d *= alpha
+       
+        beta = beta.to(tl.float16)
+        a_chunk_a += tl.dot(input=beta, other=tl.trans(input=v_chunk_a))
+        a_chunk_b += tl.dot(input=beta, other=tl.trans(input=v_chunk_b))
+        a_chunk_c += tl.dot(input=beta, other=tl.trans(input=v_chunk_c))
+        a_chunk_d += tl.dot(input=beta, other=tl.trans(input=v_chunk_d))
+
+    l_chunk = l_chunk[:, None]
+    
+    a_chunk_a /= l_chunk
+    a_chunk_b /= l_chunk
+    a_chunk_c /= l_chunk
+    a_chunk_d /= l_chunk
+
+    out_offset_base = q_offsets * 4
+    tl.store(_attention_out + out_offset_base + 0, a_chunk_a, mask=mask)
+    tl.store(_attention_out + out_offset_base + 1, a_chunk_b, mask=mask)
+    tl.store(_attention_out + out_offset_base + 2, a_chunk_c, mask=mask)
+    tl.store(_attention_out + out_offset_base + 3, a_chunk_d, mask=mask)
 
 def flash_attention_fp8_e5m2_acc_fp32_gpu(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int, h_dim: int
@@ -594,6 +765,7 @@ def paged_attention_fp8_e5m2_acc_fp32_gpu(
     block_table: torch.Tensor,
     context_lens: torch.Tensor,
     h_dim: int,
+    num_heads_per_chunk: int,
 ):
     """
     Paged Attention kernel on `FP8_E5M2` packed into `FP32` arrays.
@@ -602,7 +774,7 @@ def paged_attention_fp8_e5m2_acc_fp32_gpu(
     Parameters
     ----------
     q : torch.Tensor
-        Query tensor. Shape: [Batch_Size, Num_Heads, Head_Dim_Packed].
+        Query tensor. Shape: [batch_size, num_heads, h_dim].
     k_cache : torch.Tensor
         Key Cache. Shape: [Num_Phys_Blocks, Num_Heads, Head_Dim_Packed, Block_Size].
     v_cache : torch.Tensor
@@ -626,10 +798,9 @@ def paged_attention_fp8_e5m2_acc_fp32_gpu(
     max_blocks_per_seq = block_table.shape[1]
 
     out = torch.empty(
-        (batch_size, num_heads, h_dim * 4), dtype=torch.float32, device=q.device
+        (batch_size, num_heads, h_dim * 4), dtype=torch.float16, device=q.device
     )
 
-    num_heads_per_chunk = 4
     grid = (batch_size, triton.cdiv(num_heads, num_heads_per_chunk))
 
     _paged_attention_fp8_e5m2_acc_fp32_kernel[grid](
@@ -649,4 +820,68 @@ def paged_attention_fp8_e5m2_acc_fp32_gpu(
         num_stages=1,
     )
 
-    return out
+    return out.to(torch.float32)
+
+def paged_attention_fp8_e4m3_acc_fp32_gpu(
+    q: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    block_table: torch.Tensor,
+    context_lens: torch.Tensor,
+    h_dim: int,
+    num_heads_per_chunk: int,
+):
+    """
+    Paged Attention kernel on `FP8_E4M3` packed into `FP32` arrays.
+    Designed for the decoding phase (1 query token per sequence).
+
+    Parameters
+    ----------
+    q : torch.Tensor
+        Query tensor. Shape: [batch_size, num_heads, h_dim].
+    k_cache : torch.Tensor
+        Key Cache. Shape: [Num_Phys_Blocks, Num_Heads, Head_Dim_Packed, Block_Size].
+    v_cache : torch.Tensor
+        Value Cache. Shape: [Num_Phys_Blocks, Num_Heads, Head_Dim_Packed, Block_Size].
+    block_table : torch.Tensor
+        Block Table. Shape: [Batch_Size, Max_Blocks_Per_Seq].
+    context_lens : torch.Tensor
+        Actual sequence lengths. Shape: [Batch_Size].
+    h_dim : int
+        Packed Embedding Dimension (Original Dim // 4).
+
+    Returns
+    -------
+    torch.Tensor
+        Attention output. Shape: [Batch_Size, Num_Heads, Head_Dim_Packed * 4].
+        (Returned as unpacked FP32).
+    """
+
+    batch_size, num_heads, _ = q.shape
+    block_size = k_cache.shape[-1]
+    max_blocks_per_seq = block_table.shape[1]
+
+    out = torch.empty(
+        (batch_size, num_heads, h_dim * 4), dtype=torch.float16, device=q.device
+    )
+
+    grid = (batch_size, triton.cdiv(num_heads, num_heads_per_chunk))
+
+    _paged_attention_fp8_e4m3_acc_fp32_kernel[grid](
+        q,
+        k_cache,
+        v_cache,
+        block_table,
+        context_lens,
+        out,
+        _batch_size=int(batch_size),
+        _head_dim=h_dim,
+        _n_heads=num_heads,
+        _n_heads_per_chunk=num_heads_per_chunk,
+        _max_blocks_per_sequence=max_blocks_per_seq,
+        _block_size=block_size,
+        num_warps=4,
+        num_stages=1,
+    )
+
+    return out.to(torch.float32)

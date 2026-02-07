@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "black>=25.12.0",
     "isort>=7.0.0",
+    "matplotlib>=3.10.8",
     "ml-dtypes>=0.5.4",
     "numba>=0.63.1",
     "numpy>=2.3.5",
@@ -13,6 +14,7 @@ dependencies = [
     "pygaljs>=1.0.2",
     "pytest>=9.0.2",
     "pytest-benchmark>=5.2.3",
+    "seaborn>=0.13.2",
     "setuptools>=80.9.0",
     "sphinx>=9.0.4",
     "sphinx-autodoc-typehints>=3.6.0",
