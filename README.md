@@ -16,6 +16,7 @@ Modern deep learning benefits enormously from low-precision arithmetic, but nati
 
   - **Software-Based FP8**: Runs `E5M2` and `E4M3` on any CUDA GPU (RTX 20/30 series supported).
   - **3x Speedup**: Validated **3.37x** speedup on large GEMV operations.
+  - **1.5x Speedup**: Validated **1.5x** speedup with naive kernel implementation compared to `FP32` sdpa kernel with `HF`
   - **Correctness**:
       - **E5M2**: Direct bit-manipulation for maximum speed.
       - **E4M3**: Full software emulation (rebias + denorm flushing) for stability.
@@ -63,6 +64,14 @@ Performance comparison between `torch.nn.functional.scaled_dot_product_attention
 
 More results are in `results/`
 
+### LLM Inference
+- `TinyLlama/TinyLlama-1.1B-Chat-v1.0` is now available for Inference!
+
+| Framework | Elapsed Time (s) | Speedup |
+| ----------------- | ---------------- | ------------------ |
+| Feather           | 5.7778           | 1.31× faster       |
+| HF FP32           | 7.5493           | 1.00× (baseline)   |
+
 ## Installation
 
 ### Prerequisites
@@ -89,6 +98,7 @@ uv run pytest benchmark/bench_FILE_NAME.py --benchmark-histogram=benchmark_resul
 
 ## Usage Example
 
+- `GEMV` operation
 ```python
 import torch
 import feather
@@ -107,12 +117,65 @@ v_packed = feather.pack_fp8_tensor(vector, mode="E5M2").cuda()
 result = feather.gemv(m_packed, v_packed, original_shape=matrix.shape)
 ```
 
+- LLM Inference
+```python
+from feather.models.tiny_llama import *
+from feather.models.pack_weights import *
+from transformers import AutoTokenizer
+import torch
+import time
+
+model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+# offline packing
+packed_weights = pack_llama_weights(
+    hf_model=model_name,
+    savefile="tinyllama_fp8.pt",
+    dtype=torch.float16
+)
+
+# set configuration (TinyLlama-1.1B-Chat-v1.0)
+cfg = FeatherTinyLlamaConfig(
+    hidden_size=2048,
+    num_hidden_layers=22,
+    num_attention_heads=32,
+    num_key_value_heads=4,
+    intermediate_size=5632,
+    vocab_size=32000,
+    max_position_embeddings=2048,
+    kv_block_size=16,
+    max_num_blocks=256,
+    num_heads_per_chunk=1,
+)
+# initialise the model
+model = FeatherTinyLlama(cfg, packed_weights, device="cuda")
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# set prompt
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "tell me about united states of america"},
+]
+prompt = tokenizer.apply_chat_template(
+    messages, tokenize=False, add_generation_prompt=True
+)
+ids = tokenizer.encode(prompt)
+
+# generate tokens
+with torch.inference_mode():
+    out_ids = model.generate(
+      ids, max_new_tokens=256, temperature=0.0, top_p=0.9, repetition_penalty=1.15
+    )
+```
+
 ## Roadmap
 
-  - [x] SDPA Kernels
-  - [ ] Vulkan Support 
-  - [ ] Integration with Torch (Functional Forward Propagation)
-  - [ ] Integration with Torch (Functional Backward Propagation)
+  - [x] Tiny-Llama-1.1 Inference in FP8
+  - [ ] Cuda-Graph Optimisation
+  - [ ] Benchmark with VLLM
+  - [ ] Llama Family Implementation
+  - [ ] Quantisation Mechanics (Block Level etc)
+  - [ ] Improve Sampler
 
 ## License
 

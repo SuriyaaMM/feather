@@ -11,9 +11,12 @@ SEQ_LEN_PARAMETERS = [128, 256, 512, 1024, 2048]
 H_DIM_PARAMETERS = [64, 256, 512]
 BLOCK_SIZE = 16
 
+
 # pytorch implementation
 def bench_attention_torch(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    with torch.nn.attention.sdpa_kernel(backends=torch.nn.attention.SDPBackend.FLASH_ATTENTION):
+    with torch.nn.attention.sdpa_kernel(
+        backends=torch.nn.attention.SDPBackend.FLASH_ATTENTION
+    ):
         return torch.nn.functional.scaled_dot_product_attention(
             q.unsqueeze(dim=0),
             k.unsqueeze(dim=0),
@@ -57,19 +60,13 @@ def generate_input_tensors_fp16(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     q: torch.Tensor = (
-        torch.normal(mean=0, std=1, size=(seq_len, h_dim))
-        .to(torch.float16)
-        .to("cuda")
+        torch.normal(mean=0, std=1, size=(seq_len, h_dim)).to(torch.float16).to("cuda")
     )
     k: torch.Tensor = (
-        torch.normal(mean=0, std=1, size=(seq_len, h_dim))
-        .to(torch.float16)
-        .to("cuda")
+        torch.normal(mean=0, std=1, size=(seq_len, h_dim)).to(torch.float16).to("cuda")
     )
     v: torch.Tensor = (
-        torch.normal(mean=0, std=1, size=(seq_len, h_dim))
-        .to(torch.float16)
-        .to("cuda")
+        torch.normal(mean=0, std=1, size=(seq_len, h_dim)).to(torch.float16).to("cuda")
     )
     return q, k, v
 

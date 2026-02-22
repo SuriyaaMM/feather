@@ -344,7 +344,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
     )
     l_chunk = tl.zeros(shape=(_n_heads_per_chunk,), dtype=tl.float32)
 
-    # attention output 
+    # attention output
     a_chunk_a = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_b = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_c = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
@@ -420,6 +420,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
         )
 
         t_chunk /= sqrt_d
+        t_chunk = tl.where(mask_kv, t_chunk, float("-inf"))
 
         # online softmax
         m_chunk_inner_this = tl.max(t_chunk, axis=1)
@@ -436,7 +437,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
         a_chunk_b *= alpha
         a_chunk_c *= alpha
         a_chunk_d *= alpha
-       
+
         beta = beta.to(tl.float16)
         a_chunk_a += tl.dot(input=beta, other=tl.trans(input=v_chunk_a))
         a_chunk_b += tl.dot(input=beta, other=tl.trans(input=v_chunk_b))
@@ -444,7 +445,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
         a_chunk_d += tl.dot(input=beta, other=tl.trans(input=v_chunk_d))
 
     l_chunk = l_chunk[:, None]
-    
+
     a_chunk_a /= l_chunk
     a_chunk_b /= l_chunk
     a_chunk_c /= l_chunk
@@ -455,6 +456,7 @@ def _paged_attention_fp8_e5m2_acc_fp32_kernel(
     tl.store(_attention_out + out_offset_base + 1, a_chunk_b, mask=mask)
     tl.store(_attention_out + out_offset_base + 2, a_chunk_c, mask=mask)
     tl.store(_attention_out + out_offset_base + 3, a_chunk_d, mask=mask)
+
 
 @triton.jit
 def _paged_attention_fp8_e4m3_acc_fp32_kernel(
@@ -499,7 +501,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
     mask = mask[:, None]
 
     # load q
-    q_chunk_packed = tl.load(pointer=_q + q_offsets, mask=mask, other=0.0)
+    q_chunk_packed = tl.load(pointer=_q + q_offsets, mask=mask, other=0)
     # unpack q
     q_chunk_a = _unpack_e4m3_to_fp16(tl.cast((q_chunk_packed) & 0xFF, dtype=tl.uint16))
     q_chunk_b = _unpack_e4m3_to_fp16(
@@ -518,7 +520,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
     )
     l_chunk = tl.zeros(shape=(_n_heads_per_chunk,), dtype=tl.float32)
 
-    # attention output 
+    # attention output
     a_chunk_a = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_b = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
     a_chunk_c = tl.zeros(shape=(_n_heads_per_chunk, _head_dim), dtype=tl.float32)
@@ -594,6 +596,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
         )
 
         t_chunk /= sqrt_d
+        t_chunk = tl.where(mask_kv, t_chunk, float("-inf"))
 
         # online softmax
         m_chunk_inner_this = tl.max(t_chunk, axis=1)
@@ -610,7 +613,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
         a_chunk_b *= alpha
         a_chunk_c *= alpha
         a_chunk_d *= alpha
-       
+
         beta = beta.to(tl.float16)
         a_chunk_a += tl.dot(input=beta, other=tl.trans(input=v_chunk_a))
         a_chunk_b += tl.dot(input=beta, other=tl.trans(input=v_chunk_b))
@@ -618,7 +621,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
         a_chunk_d += tl.dot(input=beta, other=tl.trans(input=v_chunk_d))
 
     l_chunk = l_chunk[:, None]
-    
+
     a_chunk_a /= l_chunk
     a_chunk_b /= l_chunk
     a_chunk_c /= l_chunk
@@ -629,6 +632,7 @@ def _paged_attention_fp8_e4m3_acc_fp32_kernel(
     tl.store(_attention_out + out_offset_base + 1, a_chunk_b, mask=mask)
     tl.store(_attention_out + out_offset_base + 2, a_chunk_c, mask=mask)
     tl.store(_attention_out + out_offset_base + 3, a_chunk_d, mask=mask)
+
 
 def flash_attention_fp8_e5m2_acc_fp32_gpu(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int, h_dim: int
@@ -821,6 +825,7 @@ def paged_attention_fp8_e5m2_acc_fp32_gpu(
     )
 
     return out.to(torch.float32)
+
 
 def paged_attention_fp8_e4m3_acc_fp32_gpu(
     q: torch.Tensor,

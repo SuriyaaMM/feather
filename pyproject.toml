@@ -3,7 +3,9 @@ name = "feather"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "accelerate>=1.12.0",
     "black>=25.12.0",
+    "datasets>=4.5.0",
     "isort>=7.0.0",
     "matplotlib>=3.10.8",
     "ml-dtypes>=0.5.4",
@@ -19,6 +21,7 @@ dependencies = [
     "sphinx>=9.0.4",
     "sphinx-autodoc-typehints>=3.6.0",
     "torch>=2.9.1",
+    "transformers>=5.2.0",
     "triton>=3.5.1",
     "wheel>=0.45.1",
 ]

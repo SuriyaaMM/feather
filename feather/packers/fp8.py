@@ -365,8 +365,6 @@ def unpack_fp8_from_fp32(a: np.ndarray, mode: str = "E5M2") -> np.ndarray:
     - Unpacked FP8's are upcasted to FP16 because FP8 isn't supported natively by numpy
     """
     # sanity checks
-    if a.dtype != np.float32:
-        logging.warning(f"PARAM a ({a}) was not float32, routine is undefined!")
     if len(a.shape) > 1:
         logging.warning(f"PARAM a ({a}) had more than 1 element to pack")
 
@@ -378,7 +376,7 @@ def unpack_fp8_from_fp32(a: np.ndarray, mode: str = "E5M2") -> np.ndarray:
         raise NotImplementedError(f"Mode {mode} not supported")
 
     # view as u32
-    a_u32 = np.array([a], dtype=np.float32).view(np.uint32)[0]
+    a_u32 = np.uint32(a)
 
     # extract bits as packed
     x_u32 = (a_u32) & 0xFF
@@ -436,3 +434,24 @@ def unpack_into_fp8_ndarray(x: np.ndarray, mode: str = "E5M2") -> np.ndarray:
         idx += 4
 
     return out
+
+
+def unpack_fp8_tensor(x: torch.Tensor, mode: str = "E5M2") -> torch.Tensor:
+    """
+    Unpacks a `torch.Tensor` of packed FP8 values (int32) back into FP16.
+    Inverse of `pack_fp8_tensor`. Output contains `n*4` FP16 elements.
+
+    Parameters
+    ----------
+    x: torch.Tensor
+        Tensor of packed int32 values (each holds 4 FP8 values in bytes 0-3).
+    mode: str
+        FP8 standard to use. Available options: E5M2, E4M3
+
+    Returns
+    -------
+    torch.Tensor
+        Flat FP16 tensor with n*4 elements.
+    """
+    x_np = x.flatten().cpu().numpy()
+    return torch.from_numpy(unpack_into_fp8_ndarray(x_np, mode=mode))

@@ -10,3 +10,4 @@ docs/_build
 benchmark/scripts
 accelerators/.feather_accelerator_vulkan_logs
 accelerators/builddir
+debug/

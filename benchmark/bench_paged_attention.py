@@ -13,6 +13,7 @@ BATCH_SIZE_PARAMETERS = [1]
 NUM_HEADS_PARAMETERS = [4]
 BLOCK_SIZE = 16
 
+
 # pytorch implementation
 def bench_paged_attention_torch(
     q: torch.Tensor,
@@ -56,15 +57,29 @@ def bench_paged_attention_fp8_e5m2_feather_gpu(
     q, k_cache, v_cache, block_table, context_lens, h_dim_packed, num_heads_per_chunk
 ):
     return paged_attention_fp8_e5m2_acc_fp32_gpu(
-        q, k_cache, v_cache, block_table, context_lens, h_dim_packed, num_heads_per_chunk
+        q,
+        k_cache,
+        v_cache,
+        block_table,
+        context_lens,
+        h_dim_packed,
+        num_heads_per_chunk,
     )
+
 
 def bench_paged_attention_fp8_e4m3_feather_gpu(
     q, k_cache, v_cache, block_table, context_lens, h_dim_packed, num_heads_per_chunk
 ):
     return paged_attention_fp8_e4m3_acc_fp32_gpu(
-        q, k_cache, v_cache, block_table, context_lens, h_dim_packed, num_heads_per_chunk
+        q,
+        k_cache,
+        v_cache,
+        block_table,
+        context_lens,
+        h_dim_packed,
+        num_heads_per_chunk,
     )
+
 
 # ----- generators
 @pytest.fixture
@@ -79,16 +94,14 @@ def generate_paged_input_tensors(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
-    int
+    int,
 ]:
 
     max_blocks_per_seq = (seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
     total_blocks = batch_size * max_blocks_per_seq
 
     q_ref = (
-        torch.randn(size=(batch_size, num_heads, h_dim))
-        .to(torch.float16)
-        .to("cuda")
+        torch.randn(size=(batch_size, num_heads, h_dim)).to(torch.float16).to("cuda")
     )
     k_ref = (
         torch.randn(size=(total_blocks, num_heads, h_dim, BLOCK_SIZE))
@@ -125,35 +138,32 @@ def generate_paged_input_tensors(
         v_ref.to("cuda"),
         block_table.to("cuda"),
         context_lens.to("cuda"),
-        total_blocks
+        total_blocks,
     )
 
 
 # ----- tests
-# @pytest.mark.parametrize("batch_size", BATCH_SIZE_PARAMETERS)
-# @pytest.mark.parametrize("h_dim", H_DIM_PARAMETERS)
-# @pytest.mark.parametrize("num_heads", NUM_HEADS_PARAMETERS)
-# @pytest.mark.parametrize("seq_len", SEQ_LEN_PARAMETERS)
-# def test_paged_attention_fp32_torch(
-#     benchmark, batch_size, h_dim, num_heads, seq_len, generate_paged_input_tensors
-# ):
-    
-#     q, k, v, block_table, context_lens, _ = generate_paged_input_tensors
-
-#     benchmark(bench_paged_attention_torch, q, k, v, batch_size, num_heads, h_dim, block_table, context_lens)
-
-
 @pytest.mark.parametrize("batch_size", BATCH_SIZE_PARAMETERS)
 @pytest.mark.parametrize("h_dim", H_DIM_PARAMETERS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS_PARAMETERS)
 @pytest.mark.parametrize("seq_len", SEQ_LEN_PARAMETERS)
-def test_paged_attention_fp32_flashinfer(
+def test_paged_attention_fp32_torch(
     benchmark, batch_size, h_dim, num_heads, seq_len, generate_paged_input_tensors
 ):
-    
+
     q, k, v, block_table, context_lens, _ = generate_paged_input_tensors
 
-    benchmark(bench_paged_attention_flashinfer, q, k, v, block_table, context_lens)
+    benchmark(
+        bench_paged_attention_torch,
+        q,
+        k,
+        v,
+        batch_size,
+        num_heads,
+        h_dim,
+        block_table,
+        context_lens,
+    )
 
 
 @pytest.mark.parametrize("batch_size", BATCH_SIZE_PARAMETERS)
@@ -184,12 +194,15 @@ def test_paged_attention_fp8_e5m2_feather_gpu(
         block_table,
         context_lens,
         h_dim // 4,
-        num_heads
+        num_heads,
     )
 
-    attn_torch = bench_paged_attention_torch(q, k, v, batch_size, num_heads, h_dim, block_table, context_lens).to(torch.float32)
+    attn_torch = bench_paged_attention_torch(
+        q, k, v, batch_size, num_heads, h_dim, block_table, context_lens
+    ).to(torch.float32)
 
     tt.assert_close(attn_torch, attn_out, rtol=0.40, atol=2.0)
+
 
 @pytest.mark.parametrize("batch_size", BATCH_SIZE_PARAMETERS)
 @pytest.mark.parametrize("h_dim", H_DIM_PARAMETERS)
@@ -219,9 +232,11 @@ def test_paged_attention_fp8_e4m3_feather_gpu(
         block_table,
         context_lens,
         h_dim // 4,
-        num_heads
+        num_heads,
     )
 
-    attn_torch = bench_paged_attention_torch(q, k, v, batch_size, num_heads, h_dim, block_table, context_lens).to(torch.float32)
+    attn_torch = bench_paged_attention_torch(
+        q, k, v, batch_size, num_heads, h_dim, block_table, context_lens
+    ).to(torch.float32)
 
     tt.assert_close(attn_torch, attn_out, rtol=0.30, atol=2.0)
